@@ -1,0 +1,360 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum FactSource {
+  MERCHANT_CONFIRMED
+  AI_SUGGESTED
+}
+
+enum AssetKind {
+  PRODUCT
+  CHARACTER
+  SCENE
+}
+
+enum AssetOrigin {
+  UPLOAD
+  AI_GENERATED
+}
+
+enum AssetStatus {
+  GENERATING
+  READY
+  FAILED
+  REJECTED
+}
+
+enum FaceStatus {
+  UNKNOWN
+  NONE
+  DETECTED
+}
+
+/// 含真人脸的图片怎么处理（D-28）
+enum FaceResolution {
+  NONE
+  VIRTUAL_PORTRAIT
+  AI_SIMILAR
+  EXCLUDED
+}
+
+enum JobKind {
+  FULL
+  RESHOOT
+}
+
+enum JobStatus {
+  QUEUED
+  GENERATING
+  COMPOSING
+  QC
+  COMPLETED
+  PARTIAL_FAILED
+  FAILED
+  CANCELLED
+}
+
+enum ClipStatus {
+  QUEUED
+  SUBMITTING
+  SUBMITTED
+  RUNNING
+  TRANSFERRING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum OutputStatus {
+  COMPOSING
+  READY
+  FAILED
+}
+
+enum ChatEditStatus {
+  PROPOSED
+  APPLIED
+  DISCARDED
+}
+
+model User {
+  id        String    @id @default(cuid())
+  name      String
+  createdAt DateTime  @default(now())
+  sessions  Session[]
+  products  Product[]
+  projects  Project[]
+  assets    Asset[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Product {
+  id             String        @id @default(cuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String        @default("")
+  description    String        @default("")
+  targetAudience String        @default("")
+  category       String        @default("")
+  /// 最近一次素材理解的结果：缺失信息、建议等
+  analysis       Json?
+  analyzedAt     DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  facts          ProductFact[]
+  assets         Asset[]
+  projects       Project[]
+
+  @@index([userId, createdAt])
+}
+
+/// 卖点与商品事实。只有 MERCHANT_CONFIRMED 能进入口播与字幕
+model ProductFact {
+  id        String     @id @default(cuid())
+  productId String
+  product   Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  text      String
+  source    FactSource
+  position  Int        @default(0)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([productId])
+}
+
+model Asset {
+  id                   String         @id @default(cuid())
+  userId               String
+  user                 User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId            String?
+  product              Product?       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  projectId            String?
+  kind                 AssetKind
+  origin               AssetOrigin
+  status               AssetStatus
+  objectKey            String?
+  mime                 String?
+  width                Int?
+  height               Int?
+  sizeBytes            Int?
+  sha256               String?
+  label                String         @default("")
+  /// 商品图用途：正面、侧面、细节、包装等（素材理解给出）
+  viewRole             String         @default("")
+  description          String         @default("")
+  /// 图片质量诊断：{ level, issues[] }
+  quality              Json?
+  face                 FaceStatus     @default(UNKNOWN)
+  faceResolution       FaceResolution @default(NONE)
+  virtualPortraitId    String?
+  /// faceResolution = AI_SIMILAR 时，替代用的 AI 生成人物图
+  replacementAssetId   String?
+  /// AI 生成方式：{ mode: 't2i' | 'i2i_product' | 'similar_person', instruction? }
+  generation           Json?
+  /// AI 生成时的提示词与来源
+  prompt               String?
+  sourceAssetId        String?
+  providerModelId      String?
+  providerUrl          String?
+  providerUrlExpiresAt DateTime?
+  generatedAt          DateTime?
+  /// AI 修改过的商品图与原图的比对结论
+  comparison           Json?
+  rejectReason         String?
+  errorMessage         String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  @@index([productId])
+  @@index([projectId])
+}
+
+model Project {
+  id              String          @id @default(cuid())
+  userId          String
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  title           String          @default("")
+  currentOutputId String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  storylines      Storyline[]
+  storyboards     Storyboard[]
+  jobs            GenerationJob[]
+  clips           Clip[]
+  outputs         Output[]
+  chatEdits       ChatEdit[]
+
+  @@index([userId, createdAt])
+}
+
+model Storyline {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  batch     Int
+  position  Int
+  /// StorylineContent（packages/shared）
+  content   Json
+  direction String   @default("")
+  selected  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, batch])
+}
+
+/// 故事板按版本保存；每次修改生成新版本
+model Storyboard {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  storylineId String
+  version     Int
+  /// StoryboardSpec（packages/shared）
+  spec        Json
+  /// 系统选定的视频模型（能力登记表键名）
+  videoModel  String
+  note        String   @default("")
+  createdAt   DateTime @default(now())
+
+  @@unique([projectId, version])
+}
+
+model GenerationJob {
+  id             String          @id @default(cuid())
+  userId         String
+  projectId      String
+  project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  storyboardId   String
+  kind           JobKind
+  resolution     String
+  shotIds        Json
+  idempotencyKey String
+  status         JobStatus
+  baseOutputId   String?
+  outputId       String?
+  errorMessage   String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  finishedAt     DateTime?
+  clips          Clip[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([projectId, createdAt])
+}
+
+/// 镜头片段：一次视频模型调用的结果。版本不覆盖
+model Clip {
+  id                String        @id @default(cuid())
+  projectId         String
+  project           Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  jobId             String
+  job               GenerationJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  storyboardId      String
+  shotId            String
+  version           Int
+  /// 生成时镜头内容的哈希，用于判断镜头是否被修改过
+  specHash          String
+  provider          String
+  modelKey          String
+  modelId           String
+  resolution        String
+  durationSec       Int
+  /// 发给供应商的请求（图片只记录来源，不含图片数据）
+  request           Json
+  providerTaskId    String?
+  status            ClipStatus
+  rawStatus         String?
+  usage             Json?
+  seed              BigInt?
+  errorCode         String?
+  errorMessage      String?
+  /// 供应商结果链接（只保存 24 小时，转存后清空，不对前端暴露）
+  providerVideoUrl  String?
+  rawObjectKey      String?
+  objectKey         String?
+  actualDurationSec Float?
+  width             Int?
+  height            Int?
+  submitAttempts    Int           @default(0)
+  nextAttemptAt     DateTime?
+  queuedAt          DateTime      @default(now())
+  submittedAt       DateTime?
+  lastPolledAt      DateTime?
+  finishedAt        DateTime?
+
+  @@unique([projectId, shotId, version])
+  @@index([status, queuedAt])
+  @@index([jobId])
+}
+
+/// 成片版本：每个镜头选中的片段 + 字幕
+model Output {
+  id           String       @id @default(cuid())
+  projectId    String
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version      Int
+  jobId        String?
+  storyboardId String
+  /// [{ shotId, clipId }]，按镜头顺序
+  selection    Json
+  /// [{ shotId, text }]
+  captions     Json
+  status       OutputStatus
+  resolution   String
+  objectKey    String?
+  coverKey     String?
+  durationSec  Float?
+  width        Int?
+  height       Int?
+  note         String       @default("")
+  shareToken   String?      @unique
+  errorMessage String?
+  createdAt    DateTime     @default(now())
+  qcRecords    QcRecord[]
+
+  @@unique([projectId, version])
+}
+
+/// 质检记录：只记录，不拦截（D-12）
+model QcRecord {
+  id        String   @id @default(cuid())
+  outputId  String
+  output    Output   @relation(fields: [outputId], references: [id], onDelete: Cascade)
+  state     String
+  reasons   Json
+  detail    Json
+  modelId   String?
+  createdAt DateTime @default(now())
+}
+
+model ChatEdit {
+  id         String         @id @default(cuid())
+  projectId  String
+  project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  page       String
+  message    String
+  reply      String         @default("")
+  operations Json
+  changes    Json
+  status     ChatEditStatus
+  result     Json?
+  createdAt  DateTime       @default(now())
+  appliedAt  DateTime?
+}

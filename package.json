@@ -1,0 +1,37 @@
+{
+  "name": "ai-creative",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AI 电商营销视频创作（第一版：H5 + NestJS + Remotion）",
+  "workspaces": [
+    "packages/shared",
+    "packages/composition",
+    "apps/server",
+    "apps/h5"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "build:shared": "npm run build -w @ai-creative/shared",
+    "db:migrate": "npm run db:migrate -w @ai-creative/server",
+    "dev:server": "npm run dev -w @ai-creative/server",
+    "dev:worker": "npm run dev:worker -w @ai-creative/server",
+    "dev:h5": "npm run dev -w @ai-creative/h5",
+    "lint": "eslint .",
+    "typecheck": "npm run build:shared && npm run typecheck --workspaces --if-present",
+    "test": "npm run build:shared && npm run test --workspaces --if-present",
+    "check": "npm run lint && npm run typecheck && npm run test",
+    "inspect": "npm run inspect -w @ai-creative/server --"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^16.5.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "^8.47.0"
+  }
+}
