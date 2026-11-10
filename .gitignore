@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+build/
+.remotion-bundle/
+*.tsbuildinfo
+
+# env and secrets
+.env
+.env.*
+!.env.example
+
+# local data and temp
+.data/
+.tmp/
+tmp/
+coverage/
+test-results/
+playwright-report/
+apps/h5/e2e/screenshots/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.log
