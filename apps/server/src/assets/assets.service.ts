@@ -87,7 +87,7 @@ export class AssetsService {
   async remove(userId: string, assetId: string) {
     const asset = await this.requireAsset(userId, assetId);
     // 已被故事板或片段引用的图片保留（历史版本仍要用），只从商品素材列表里移除
-    await this.prisma.asset.update({ where: { id: asset.id }, data: { productId: null } });
+    await this.prisma.asset.update({ where: { id: asset.id }, data: { productId: null, projectId: null } });
     return { ok: true };
   }
 

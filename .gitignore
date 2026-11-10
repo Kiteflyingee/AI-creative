@@ -26,3 +26,4 @@ apps/h5/e2e/screenshots/
 .idea/
 .vscode/
 *.log
+apps/h5/e2e/review/

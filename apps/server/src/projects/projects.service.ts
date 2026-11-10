@@ -109,6 +109,7 @@ export class ProjectsService {
       selection: output.selection,
       captions: output.captions,
       note: output.note,
+      resolution: output.resolution,
       durationSec: output.durationSec,
       width: output.width,
       height: output.height,
