@@ -1,59 +1,54 @@
-# AI 电商营销视频 App｜项目文档
+# AI 电商营销视频｜第一版
 
-**文档版本**：v0.3 · 2026-11-10（v0.1 存档于 `交接包/` 与 `设计方案.md`）  
+**版本**：v0.3 · 2026-11-10（v0.1 存档于 `交接包/` 与 `设计方案.md`）  
 **定位**：面向普通电商卖家的 To C 创作产品，第一版为 H5  
-**对标**：火山引擎 Kickart（产品能力/工作流）+ 阿里云 Aidge（商品保真/生产稳定性）  
-**生成方式**：按 Kickart 设计，先准备参考图，再逐镜头调用视频模型生成，最后用 Remotion 合成；视频模型通用，第一版接 Seedance 2.5，图片模型接 Seedream 5.0 pro，大模型用 DeepSeek  
-**首要竞争力**：低操作门槛、可用成片质量。
+**生成方式**：按 Kickart 的设计，先用文字定好方案（素材理解 → 4 条故事线 → 故事板），再逐镜头调用视频模型生成，最后用 Remotion 拼接并叠加字幕。视频模型通用（第一版接 Seedance 2.5），图片模型接 Seedream 5.0 pro，大模型用 DeepSeek。
 
-> v0.3 的已定决策见 [`docs/decisions.md`](docs/decisions.md)，它优先于下文与 02–06 中的 v0.2 内容。代码说明见文末“本地开发”。
+> 已定决策见 [`docs/decisions.md`](docs/decisions.md)，实现说明见 [`docs/07-第一版实现说明.md`](docs/07-第一版实现说明.md)，二者优先于 02–05 中的 v0.2 内容。
 
-## 一句话概念
+## 本地开发
 
-> 刷到灵感，选自己的商品，确认故事板，生成可用的带货视频；不满意就只修改出问题的镜头。
+需要：Node.js 22、Docker Desktop、FFmpeg（`brew install ffmpeg`）。
 
-（“只修改出问题的镜头”是 P1 目标；MVP 阶段为修改故事板后整条重新生成，见 decisions P-01。）
+```bash
+cp .env.example .env          # 填写 DEEPSEEK_API_KEY、ARK_API_KEY（火山方舟，需开通 Seedance 2.5 与 Seedream 5.0 pro）
+npm install
+npm run infra:up              # PostgreSQL、Redis、MinIO（http://localhost:9001，minioadmin/minioadmin）
+npm run build:shared
+npm run db:migrate            # 创建数据表
+npm run dev:server            # 后端 http://localhost:3001（后台任务在同一进程）
+npm run dev:h5                # H5 http://localhost:5173（浏览器切到手机模式；真机调试见 .env 中的局域网地址说明）
+```
 
-## 已经确定的产品边界
+- 没有 Mock 模式：不填密钥时，素材理解、故事线等会提示“未配置 API Key”。
+- 本地开发时发给模型的图片用 Base64（`MODEL_IMAGE_TRANSPORT=base64`），不需要公网存储；上线接阿里云 OSS 后改为 `signed_url`。
+- 虚拟人像：在火山控制台开通虚拟人像库后，参照 `config/virtual-portraits.example.json` 写一个 `config/virtual-portraits.json`。
+- 第一次合成时 Remotion 会自动下载 Chrome Headless Shell（约 100MB）。
 
-- **优先移动端**：React Native + Expo，同时保留 React + Arco Design 的运营后台。
-- **To C，而非 To B API**：不建设对外 API、SDK、开发者平台。后端仅提供 App/运营后台使用的内部接口。
-- **通用底座**：不按服装、宠物用品等品类建立独立产品；差异由商品结构、案例模板和专项质量规则处理。
-- **主要对标 Kickart**：灵感广场、一键成片、Storyline、Storyboard、自由创作、爆款重构、混剪。
-- **Aidge 借鉴重点**：商品参考图优先、视觉一致性检测、镜头级错误修复。
-- **围绕 Seedance 2.5 设计**：画面、口播、环境音、画面字幕一次生成；不出样片；字幕不做后期叠加；关闭水印。以后再适配能力较弱的模型。
-- **先扣积分再生成**：商家确认故事板、分辨率（480p / 720p / 1080p，默认 720p）和时长（4–30 秒）后扣积分；未能成片全额退回，成片后不满意不退。MVP 积分来自新用户赠送和运营发放，不接支付。
-- **案例素材合规**：自制、授权和用户有权上传的内容。收藏外部链接不等于获得下载、分析、改编或展示授权。
-- **成本诚实**：如实记录每条合格成片的真实成本，不设未经验证的成本目标。
+## 检查与测试
+
+```bash
+npm run check                                  # ESLint + 类型检查 + 单元/集成测试（假供应商，不产生费用）
+npm run test:render -w @ai-creative/server     # 真实 Remotion 渲染测试
+npx playwright install chromium                # 首次运行端到端测试前
+npm run e2e -w @ai-creative/h5                 # 手机尺寸端到端测试，截图在 apps/h5/e2e/screenshots/
+npm run inspect -- <projectId>                 # 命令行查看任务、片段、质检记录
+npm run smoke:real -w @ai-creative/server -- --image 商品图.jpg --yes   # 真实调用冒烟（约 8 元，执行前请确认）
+```
 
 ## 文件导航
 
-1. [`docs/01-竞品与设计依据.md`](docs/01-竞品与设计依据.md) — 官方可验证的 Kickart / Aidge 能力、借鉴矩阵、来源链接、v0.2 设计变化。
-2. [`docs/02-产品PRD与移动端交互.md`](docs/02-产品PRD与移动端交互.md) — 用户画像、信息架构、端到端流程、页面、功能清单和验收标准。
-3. [`docs/03-AI创作工作流与质量成本.md`](docs/03-AI创作工作流与质量成本.md) — 工作流、ProductProfile、Storyline、Storyboard、RenderPlan 与提示词编译器、积分、质检、指标。
-4. [`docs/04-技术架构与数据模型.md`](docs/04-技术架构与数据模型.md) — MVP 技术栈、部署结构、数据实体、状态机、内部接口、适配器协议、积分账务、可靠性与安全。
-5. [`docs/05-迭代计划与验收.md`](docs/05-迭代计划与验收.md) — 里程碑、ENG 任务清单、验收门槛、测试矩阵、指标。
-6. [`docs/06-模型能力与约束.md`](docs/06-模型能力与约束.md) — Seedance 2.5 与 DeepSeek 的官方能力、输入限制、生命周期、限流、价格与未实测清单。
-7. [`docs/decisions.md`](docs/decisions.md) — 代码库现状审查、已定决策 D-01–D-23、待定决策 P-01–P-10。
-8. [`docs/mvp-flows.md`](docs/mvp-flows.md) — MVP 页面流程、数据流、生成时序图，以及原型阶段 mock 与真实接口的界线。
-9. [`docs/first-batch-tasks.md`](docs/first-batch-tasks.md) — 第一批任务（M0 原型 + M1 实验）的依赖、验收、风险，以及 Seedance 实验清单与预算。
-10. [`AGENTS.md`](AGENTS.md) — 供 Codex 等编码代理执行时遵循的项目约束。
-11. [`设计方案-v0.2.md`](设计方案-v0.2.md) — 合并版（01–06、decisions、AGENTS 约束），便于整篇阅读或粘贴给编码代理。
+1. [`docs/decisions.md`](docs/decisions.md) — 已定决策、v0.2 决策去向、下一版范围、待核对事项。
+2. [`docs/07-第一版实现说明.md`](docs/07-第一版实现说明.md) — 原理、代码结构、数据模型、状态、模型调用、合成与标识、接口、测试、已知限制。
+3. [`docs/06-模型能力与约束.md`](docs/06-模型能力与约束.md) — Seedance 2.5、Seedream 5.0 pro、DeepSeek 的官方能力、限制、价格、肖像方案与未实测清单。
+4. [`docs/01-竞品与设计依据.md`](docs/01-竞品与设计依据.md) — Kickart / Aidge 公开能力与借鉴矩阵。
+5. `docs/02`–`05`、[`docs/mvp-flows.md`](docs/mvp-flows.md)、[`docs/first-batch-tasks.md`](docs/first-batch-tasks.md) — v0.2 的产品、工作流、架构与计划（开头有 v0.3 提示）。
+6. [`AGENTS.md`](AGENTS.md) — 编码代理需要遵守的项目约束。
+7. [`设计方案-v0.3.md`](设计方案-v0.3.md) — 合并版（decisions、07、06、AGENTS 约束）。
 
-## 给编码代理的第一条任务（可直接复制）
+## 边界
 
-```text
-请先阅读仓库根目录的 AGENTS.md、README.md、docs/decisions.md 与 docs/ 下的其他设计文档（v0.2）。
-本项目是移动优先的 To C 电商营销视频 App，不是公开 API 平台；视频由 Seedance 2.5 一次生成，生成前扣积分。
-文档冲突时以 docs/decisions.md 为准。
-请按 docs/first-batch-tasks.md 的顺序工作，先从 ENG-001（Monorepo 与基础 CI）开始：
-1. 每个任务开始前说明范围与验收标准，完成后报告测试结果与仍存在的限制；
-2. mock 原型中的假数据、模拟进度、占位视频必须在界面上标注 mock；
-3. 不要发起付费的 Seedance 调用；M1 实验必须等我确认预算；
-4. 遇到文档无法决定的问题，先对照 decisions.md 的待定决策，再向我提问。
-不要假定已经具备真实授权案例、商店支付能力或商家商品接口。
-```
-
-## 使用说明
-
-这是一份**产品设计和研发交接文档**，不是对 Kickart/Aidge 内部源码的逆向取得；公开竞品事实、供应商官方资料、设计推断和待验证事项已分别标注。Seedance 与 DeepSeek 的能力和价格以官方文档为准，实现前需重新核对（见 06 §1）。
+- 不做公开 API、SDK、开发者平台；内部接口只给 H5 使用。
+- 不编造商品属性、功效、销量或测试结果；只有商家确认的卖点进入口播和字幕。
+- 含真人脸的原图不发给视频模型（换虚拟人像、AI 相似人物或不用）。
+- 第一版不做：积分、运营后台、爆款模仿、真人授权入库、时间轴精修、其他视频模型的具体接入。
