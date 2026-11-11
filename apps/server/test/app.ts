@@ -6,16 +6,27 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { GenerationService } from '../src/generation/generation.service';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { COMPOSER, IMAGE_PROVIDER, LLM_PROVIDER, VIDEO_PROVIDER } from '../src/providers/types';
+import { defaultModels } from '../src/providers/registry';
+import { COMPOSER, LLM_PROVIDER, PROVIDER_FACTORY } from '../src/providers/types';
 import { JOB_QUEUE } from '../src/queue/job-queue';
 import { buildProcessors } from '../src/queue/processors';
 import { StorageService } from '../src/storage/storage.service';
-import { FakeComposer, FakeImageProvider, FakeLlm, FakeVideoProvider, InlineJobQueue } from './fakes';
+import {
+  FakeComposer,
+  FakeLlm,
+  FakeProviderFactory,
+  InlineJobQueue,
+  type FakeImageProvider,
+  type FakeVideoProvider,
+} from './fakes';
 
 export interface TestContext {
   app: INestApplication;
   prisma: PrismaService;
   llm: FakeLlm;
+  /** 所有模型的假供应商 */
+  providers: FakeProviderFactory;
+  /** 测试默认模型组合（Seedance 2.5 + Seedream 5.0 pro）的假供应商 */
   video: FakeVideoProvider;
   images: FakeImageProvider;
   composer: FakeComposer;
@@ -28,8 +39,7 @@ export interface TestContext {
 export async function createTestApp(): Promise<TestContext> {
   const storage = new StorageService();
   const llm = new FakeLlm();
-  const video = new FakeVideoProvider(storage);
-  const images = new FakeImageProvider();
+  const providers = new FakeProviderFactory(storage);
   const composer = new FakeComposer();
   const queue = new InlineJobQueue();
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
@@ -37,10 +47,8 @@ export async function createTestApp(): Promise<TestContext> {
     .useValue(storage)
     .overrideProvider(LLM_PROVIDER)
     .useValue(llm)
-    .overrideProvider(VIDEO_PROVIDER)
-    .useValue(video)
-    .overrideProvider(IMAGE_PROVIDER)
-    .useValue(images)
+    .overrideProvider(PROVIDER_FACTORY)
+    .useValue(providers)
     .overrideProvider(COMPOSER)
     .useValue(composer)
     .overrideProvider(JOB_QUEUE)
@@ -49,12 +57,14 @@ export async function createTestApp(): Promise<TestContext> {
   const app = moduleRef.createNestApplication();
   await app.init();
   queue.processors = buildProcessors(app);
+  const defaults = defaultModels();
   return {
     app,
     prisma: app.get(PrismaService),
     llm,
-    video,
-    images,
+    providers,
+    video: providers.videoFor(defaults.videoModel),
+    images: providers.imageFor(defaults.imageModel),
     composer,
     queue,
     generation: app.get(GenerationService),
@@ -97,8 +107,8 @@ export async function uploadImage(
 }
 
 /** 准备到“故事板已生成、参考图已生成”的项目 */
-export async function prepareStoryboard(ctx: TestContext, token: string) {
-  const created = await ctx.http().post('/app/v1/projects').set(auth(token)).send({ name: '灰色猫窝' }).expect(201);
+export async function prepareStoryboard(ctx: TestContext, token: string, name = '灰色猫窝') {
+  const created = await ctx.http().post('/app/v1/projects').set(auth(token)).send({ name }).expect(201);
   const projectId = created.body.projectId as string;
   await uploadImage(ctx, token, projectId, 'PRODUCT');
   await ctx.http().post(`/app/v1/projects/${projectId}/facts`).set(auth(token)).send({ text: '尺寸 50×40 厘米' }).expect(201);

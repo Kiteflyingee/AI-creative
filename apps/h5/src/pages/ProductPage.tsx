@@ -255,7 +255,9 @@ export function ProductPage() {
         title="人物图（可选）"
         extra={<UploadButton projectId={projectId} kind="CHARACTER" text="上传人物图" onUploaded={() => void refresh()} />}
       >
-        <p className="hint">不上传时，AI 会在故事板里生成人物。真人照片需要换成虚拟人像或 AI 相似人物</p>
+        <p className="hint">
+          不上传时，AI 会在故事板里生成人物。真人照片需要换成{view.virtualPortraits.length ? '虚拟人像或 ' : ' '}AI 相似人物
+        </p>
         <div className="asset-grid">
           {uploads('CHARACTER').map((a) => (
             <AssetCard key={a.id} asset={a} view={view} onChanged={() => void refresh()} />

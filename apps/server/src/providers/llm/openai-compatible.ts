@@ -7,14 +7,36 @@ interface ChatResponse {
   usage?: unknown;
 }
 
+export interface OpenAiCompatibleOptions {
+  provider: string;
+  baseUrl: string;
+  apiKey: string;
+  modelId: string;
+  /** 思考开关的写法：deepseek = thinking.type；reasoning_effort = OpenAI 写法（Gemini 兼容接口也用它）；none = 不传 */
+  thinkingParam: 'deepseek' | 'reasoning_effort' | 'none';
+  /** json_object = 要求 JSON 输出；none = 只靠提示词，结果仍经 zod 校验 */
+  jsonMode: 'json_object' | 'none';
+}
+
+/** 不同供应商的思考参数写法 */
+export function thinkingFields(param: OpenAiCompatibleOptions['thinkingParam'], thinking: boolean): Record<string, unknown> {
+  switch (param) {
+    case 'deepseek':
+      return { thinking: { type: thinking ? 'enabled' : 'disabled' } };
+    case 'reasoning_effort':
+      return { reasoning_effort: thinking ? 'high' : 'low' };
+    default:
+      return {};
+  }
+}
+
 /**
- * OpenAI 兼容的 Chat Completions 接口：DeepSeek 官方 API 与火山方舟托管的 DeepSeek 都用这个格式。
- * 图片以 image_url（data URL 或 http URL）传入；输出要求 json_object。
+ * OpenAI 兼容的 Chat Completions 接口：DeepSeek 官方 API、火山方舟托管的 DeepSeek，
+ * 以及其他兼容接口（地址、密钥、模型、思考参数写法都可配置）。
+ * 图片以 image_url（data URL 或 http URL）传入。
  */
 export class OpenAiCompatibleLlm implements LlmProvider {
-  constructor(
-    private readonly opts: { provider: string; baseUrl: string; apiKey: string; modelId: string },
-  ) {}
+  constructor(private readonly opts: OpenAiCompatibleOptions) {}
 
   get modelId() {
     return this.opts.modelId;
@@ -41,8 +63,8 @@ export class OpenAiCompatibleLlm implements LlmProvider {
       body: {
         model: this.opts.modelId,
         messages,
-        response_format: { type: 'json_object' },
-        thinking: { type: req.thinking ? 'enabled' : 'disabled' },
+        ...(this.opts.jsonMode === 'json_object' ? { response_format: { type: 'json_object' } } : {}),
+        ...thinkingFields(this.opts.thinkingParam, Boolean(req.thinking)),
         max_tokens: req.maxTokens ?? 8000,
       },
       timeoutMs: req.thinking ? 300_000 : 180_000,

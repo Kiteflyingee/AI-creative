@@ -5,7 +5,7 @@ import { notFound } from '../common/errors';
 import { jsonSafe } from '../common/util';
 import { loadVirtualPortraits } from '../config/virtual-portraits';
 import { PrismaService } from '../prisma/prisma.service';
-import { selectedVideoModel } from '../providers/registry';
+import { defaultModels, videoCapability } from '../providers/registry';
 import { StorageService } from '../storage/storage.service';
 
 @Injectable()
@@ -22,10 +22,12 @@ export class ProjectsService {
     return project;
   }
 
+  /** 新建项目时记录当前配置的模型组合；之后改配置不影响已有项目（D-46） */
   async create(userId: string, name: string) {
+    const models = defaultModels();
     return this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({ data: { userId, name } });
-      const project = await tx.project.create({ data: { userId, productId: product.id, title: name } });
+      const project = await tx.project.create({ data: { userId, productId: product.id, title: name, ...models } });
       return { projectId: project.id, productId: product.id };
     });
   }
@@ -142,7 +144,7 @@ export class ProjectsService {
 
     let spec: StoryboardSpec | null = null;
     if (storyboard) spec = storyboardSpecSchema.parse(storyboard.spec);
-    const cap = selectedVideoModel();
+    const cap = videoCapability(project.videoModel);
 
     return jsonSafe({
       project: { id: project.id, title: project.title, currentOutputId: project.currentOutputId },
@@ -177,7 +179,8 @@ export class ProjectsService {
         duration: cap.duration,
         resolutions: cap.resolutions,
       },
-      virtualPortraits: loadVirtualPortraits(),
+      // 虚拟人像只适用于支持它的视频模型（火山）；不支持时返回空列表，前端不显示该选项
+      virtualPortraits: cap.virtualPortraits ? loadVirtualPortraits() : [],
     });
   }
 

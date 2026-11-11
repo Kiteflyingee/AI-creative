@@ -8,6 +8,7 @@ import {
   shotCountRange,
   storyboardSpecSchema,
   storylineContentSchema,
+  type DurationRule,
   type Reference,
   type Resolution,
   type Shot,
@@ -17,11 +18,12 @@ import type { Asset } from '@prisma/client';
 import { AssetsService, DEFAULT_PRODUCT_INSTRUCTION } from '../assets/assets.service';
 import { badRequest, conflict, notFound } from '../common/errors';
 import { sha256, shortId, stableStringify } from '../common/util';
+import { loadVirtualPortraits } from '../config/virtual-portraits';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProjectsService } from '../projects/projects.service';
 import { LlmService } from '../providers/llm/llm.service';
-import { selectedImageModel, selectedVideoModel } from '../providers/registry';
-import type { ImageSourceRef, ShotRenderSpec } from '../providers/types';
+import { imageCapability, imageCapabilityByModelId, videoCapability } from '../providers/registry';
+import type { ImageSourceRef, ShotRenderSpec, VideoModelCapability } from '../providers/types';
 import {
   REWRITE_IMAGE_PROMPT_SYSTEM,
   rewriteImagePromptSchema,
@@ -57,10 +59,10 @@ export class StoryboardService {
   }
 
   async requireLatest(userId: string, projectId: string) {
-    await this.projects.requireProject(userId, projectId);
+    const project = await this.projects.requireProject(userId, projectId);
     const latest = await this.latest(projectId);
     if (!latest) throw notFound('故事板');
-    return latest;
+    return { ...latest, project };
   }
 
   /** 选定故事线后生成故事板：逐镜脚本 + 参考图规划；需要的人物图、场景图随即在后台生成 */
@@ -83,7 +85,7 @@ export class StoryboardService {
     const characters = uploads.filter((a) => a.kind === 'CHARACTER' && a.faceResolution !== 'EXCLUDED');
     const scenes = uploads.filter((a) => a.kind === 'SCENE' && a.faceResolution !== 'EXCLUDED');
 
-    const cap = selectedVideoModel();
+    const cap = videoCapability(project.videoModel);
     const total = content.durationSec;
     const range = shotCountRange(total, cap.duration);
     const maxShots = Math.min(range.max, MAX_SHOTS);
@@ -131,7 +133,7 @@ export class StoryboardService {
       },
     );
 
-    const spec = await this.buildSpecFromDraft(userId, project.id, product.id, draft, keyed, total);
+    const spec = await this.buildSpecFromDraft(userId, project.id, product.id, draft, keyed, total, cap.duration);
     const saved = await this.saveVersion(userId, project.id, spec, { storylineId: storyline.id, note: '由故事线生成' });
     await this.prisma.$transaction([
       this.prisma.storyline.updateMany({ where: { projectId: project.id }, data: { selected: false } }),
@@ -151,6 +153,7 @@ export class StoryboardService {
       scenes: Array<{ key: string; asset: Asset }>;
     },
     total: number,
+    rule: DurationRule,
   ): Promise<StoryboardSpec> {
     const refByKey = new Map<string, Reference>();
     const references: Reference[] = [];
@@ -204,11 +207,10 @@ export class StoryboardService {
     await addPlanned('character', draft.characters, keyed.characters);
     await addPlanned('scene', draft.scenes, keyed.scenes);
 
-    const cap = selectedVideoModel();
     const allocation = allocateDurations(
       draft.shots.map((s) => s.durationSec),
       total,
-      cap.duration,
+      rule,
     );
     if (!allocation.ok) throw badRequest('DURATION_INVALID', allocation.message);
     const shots: Shot[] = draft.shots.map((s, i) => ({
@@ -242,13 +244,13 @@ export class StoryboardService {
     input: unknown,
     opts: { storylineId?: string; note?: string; expectedVersion?: number } = {},
   ) {
-    await this.projects.requireProject(userId, projectId);
+    const project = await this.projects.requireProject(userId, projectId);
     const parsed = storyboardSpecSchema.safeParse(input);
     if (!parsed.success) {
       throw badRequest('INVALID_STORYBOARD', `故事板不合法：${parsed.error.issues.slice(0, 3).map((i) => `${i.path.join('.')} ${i.message}`).join('；')}`);
     }
     const spec = parsed.data;
-    await this.validateIntegrity(userId, spec);
+    await this.validateIntegrity(userId, spec, videoCapability(project.videoModel).duration);
     spec.durationSec = spec.shots.reduce((sum, s) => sum + s.durationSec, 0);
 
     const latest = await this.latest(projectId);
@@ -263,7 +265,7 @@ export class StoryboardService {
         storylineId,
         version: (latest?.row.version ?? 0) + 1,
         spec,
-        videoModel: selectedVideoModel().key,
+        videoModel: project.videoModel,
         note: opts.note ?? '',
       },
     });
@@ -271,21 +273,20 @@ export class StoryboardService {
     return { id: row.id, version: row.version, spec };
   }
 
-  private async validateIntegrity(userId: string, spec: StoryboardSpec) {
+  private async validateIntegrity(userId: string, spec: StoryboardSpec, rule: DurationRule) {
     const refIds = new Set<string>();
     for (const ref of spec.references) {
       if (refIds.has(ref.refId)) throw badRequest('INVALID_STORYBOARD', `参考图 id 重复：${ref.refId}`);
       refIds.add(ref.refId);
     }
     const shotIds = new Set<string>();
-    const cap = selectedVideoModel();
     for (const [i, shot] of spec.shots.entries()) {
       if (shotIds.has(shot.shotId)) throw badRequest('INVALID_STORYBOARD', `镜头 id 重复：${shot.shotId}`);
       shotIds.add(shot.shotId);
       const unknown = shot.refIds.filter((r) => !refIds.has(r));
       if (unknown.length) throw badRequest('INVALID_STORYBOARD', `镜头 ${i + 1} 引用了不存在的参考图`);
-      if (!isDurationAllowed(shot.durationSec, cap.duration)) {
-        throw badRequest('DURATION_INVALID', `镜头 ${i + 1} 的时长 ${shot.durationSec} 秒不可用，可选：${describeRule(cap.duration)}`);
+      if (!isDurationAllowed(shot.durationSec, rule)) {
+        throw badRequest('DURATION_INVALID', `镜头 ${i + 1} 的时长 ${shot.durationSec} 秒不可用，可选：${describeRule(rule)}`);
       }
     }
     const assetIds = spec.references.flatMap((r) => [r.assetId, r.originalAssetId]).filter((x): x is string => Boolean(x));
@@ -297,24 +298,23 @@ export class StoryboardService {
 
   /** 修改总时长（15/30/60 秒），按现有镜头时长比例重新分配 */
   async setTotalDuration(userId: string, projectId: string, total: number, expectedVersion?: number) {
-    const { spec, row } = await this.requireLatest(userId, projectId);
-    const next = applyTotalDuration(spec, total);
+    const { spec, row, project } = await this.requireLatest(userId, projectId);
+    const next = applyTotalDuration(spec, total, videoCapability(project.videoModel).duration);
     return this.saveVersion(userId, projectId, next, { note: `总时长改为 ${total} 秒`, expectedVersion: expectedVersion ?? row.version });
   }
 
   /** 重新生成参考图：商品图走图生图（原图保留），人物、场景图走文生图 */
   async regenerateReference(userId: string, projectId: string, refId: string, instruction = '') {
-    const { spec, row } = await this.requireLatest(userId, projectId);
+    const { spec, row, project } = await this.requireLatest(userId, projectId);
     const ref = spec.references.find((r) => r.refId === refId);
     if (!ref) throw notFound('参考图');
-    const project = await this.projects.requireProject(userId, projectId);
     const next = structuredClone(spec);
     const target = next.references.find((r) => r.refId === refId)!;
     if (ref.kind === 'product') {
       const sourceId = ref.originalAssetId ?? ref.assetId;
       if (!sourceId) throw badRequest('NO_SOURCE', '这张商品图没有原图，请先上传');
       const source = await this.assets.requireAsset(userId, sourceId);
-      if (!selectedImageModel().imageToImage) throw badRequest('NOT_SUPPORTED', '当前图片模型不支持修改商品图');
+      if (!imageCapability(project.imageModel).imageToImage) throw badRequest('NOT_SUPPORTED', '当前图片模型不支持修改商品图');
       const generated = await this.assets.createGenerated(userId, {
         productId: project.productId,
         projectId,
@@ -377,9 +377,9 @@ export class StoryboardService {
   /**
    * 生成前检查（D-41 的前置条件）。返回商家能看懂的问题列表，空数组表示可以生成。
    */
-  async checkReadiness(userId: string, spec: StoryboardSpec, shotIds: string[]): Promise<string[]> {
+  async checkReadiness(userId: string, spec: StoryboardSpec, shotIds: string[], videoModel: string): Promise<string[]> {
     const problems: string[] = [];
-    const cap = selectedVideoModel();
+    const cap = videoCapability(videoModel);
     const shots = spec.shots.filter((s) => shotIds.includes(s.shotId));
     const usedRefIds = new Set(shots.flatMap((s) => s.refIds));
     const refs = spec.references.filter((r) => usedRefIds.has(r.refId));
@@ -388,7 +388,7 @@ export class StoryboardService {
     const replacementIds = assets.map((a) => a.replacementAssetId).filter((x): x is string => Boolean(x));
     const replacements = await this.prisma.asset.findMany({ where: { id: { in: replacementIds }, userId } });
     const byId = new Map([...assets, ...replacements].map((a) => [a.id, a]));
-    const trustDays = selectedImageModel().trustedFaceForVideoProvider?.days ?? 30;
+    const portraitsEnabled = cap.virtualPortraits && loadVirtualPortraits().length > 0;
 
     for (const ref of refs) {
       for (const id of [ref.assetId, ref.originalAssetId]) {
@@ -398,7 +398,7 @@ export class StoryboardService {
           problems.push(`参考图「${ref.name}」不存在`);
           continue;
         }
-        problems.push(...assetProblems(ref.name, asset, byId, trustDays, cap.faceInput));
+        problems.push(...assetProblems(ref.name, asset, byId, cap, portraitsEnabled));
       }
     }
     shots.forEach((shot, i) => {
@@ -484,30 +484,45 @@ export class StoryboardService {
   }
 }
 
+/** 含真人脸时商家可以选的处理方式（虚拟人像只在视频模型支持且已配置清单时出现） */
+export function faceChoicesText(portraitsEnabled: boolean): string {
+  return portraitsEnabled ? '换成虚拟人像、AI 生成相似人物，或不用这张图' : '换成 AI 生成相似人物，或不用这张图';
+}
+
 function assetProblems(
   name: string,
   asset: Asset,
   byId: Map<string, Asset>,
-  trustDays: number,
-  faceInput: string,
+  cap: VideoModelCapability,
+  portraitsEnabled: boolean,
 ): string[] {
   if (asset.status === 'GENERATING') return [`参考图「${name}」还在生成中，请稍等`];
   if (asset.status === 'FAILED') return [`参考图「${name}」生成失败，请重新生成或换一张`];
   if (asset.status !== 'READY') return [`参考图「${name}」不可用`];
-  if (asset.origin === 'UPLOAD' && asset.face === 'DETECTED' && faceInput !== 'accept') {
+  if (asset.origin === 'UPLOAD' && asset.face === 'DETECTED' && cap.faceInput !== 'accept') {
     if (asset.faceResolution === 'NONE') {
-      return [`「${name}」的图片里有真人脸，请选择换成虚拟人像、AI 生成相似人物，或不用这张图`];
+      return [`「${name}」的图片里有真人脸，请选择${faceChoicesText(portraitsEnabled)}`];
+    }
+    if (asset.faceResolution === 'VIRTUAL_PORTRAIT' && !cap.virtualPortraits) {
+      return [`「${name}」选的虚拟人像不能用于当前视频模型，请${faceChoicesText(false)}`];
     }
     if (asset.faceResolution === 'AI_SIMILAR') {
       const rep = asset.replacementAssetId ? byId.get(asset.replacementAssetId) : undefined;
       if (!rep) return [`「${name}」的 AI 相似人物不存在，请重新选择`];
-      return assetProblems(`${name}（AI 相似人物）`, rep, byId, trustDays, faceInput);
+      return assetProblems(`${name}（AI 相似人物）`, rep, byId, cap, portraitsEnabled);
     }
   }
-  if (asset.origin === 'AI_GENERATED' && asset.kind === 'CHARACTER' && asset.generatedAt) {
-    const ageDays = (Date.now() - asset.generatedAt.getTime()) / 86400_000;
-    if (ageDays > trustDays) {
-      return [`AI 人物图「${name}」已超过 ${trustDays} 天，视频模型不再接受，请重新生成人物或换成虚拟人像`];
+  // 火山只信任同账号 Seedream 文生图产物中的人脸，且有时间限制
+  if (asset.origin === 'AI_GENERATED' && asset.kind === 'CHARACTER' && cap.faceInput === 'asset_or_trusted') {
+    const trust = imageCapabilityByModelId(asset.providerModelId)?.trustedFaceForVideoProvider;
+    if (trust?.provider !== cap.provider) {
+      return [`AI 人物图「${name}」不是用当前视频模型认可的图片模型生成的，请在故事板里重新生成这个人物`];
+    }
+    if (asset.generatedAt) {
+      const ageDays = (Date.now() - asset.generatedAt.getTime()) / 86400_000;
+      if (ageDays > trust.days) {
+        return [`AI 人物图「${name}」已超过 ${trust.days} 天，视频模型不再接受，请重新生成人物${portraitsEnabled ? '或换成虚拟人像' : ''}`];
+      }
     }
   }
   return [];
@@ -519,12 +534,11 @@ export function describeRule(rule: { min: number; max: number; allowed?: readonl
 }
 
 /** 按比例把总时长重新分配给各镜头 */
-export function applyTotalDuration(spec: StoryboardSpec, total: number): StoryboardSpec {
-  const cap = selectedVideoModel();
+export function applyTotalDuration(spec: StoryboardSpec, total: number, rule: DurationRule): StoryboardSpec {
   const result = allocateDurations(
     spec.shots.map((s) => s.durationSec),
     total,
-    cap.duration,
+    rule,
   );
   if (!result.ok) throw badRequest('DURATION_INVALID', result.message);
   const next = structuredClone(spec);

@@ -28,10 +28,13 @@ export interface VideoModelCapability {
   supportsExtend: boolean;
   canDisableWatermark: boolean;
   faceInput: FaceInputPolicy;
+  /** 是否支持供应商预置的虚拟人像（火山 asset://）；不支持时前端不显示“换虚拟人像” */
+  virtualPortraits: boolean;
   regions: readonly string[];
+  /** 并发与每分钟请求数按供应商账号计算：同一 provider 的模型共用这一组限制 */
   limits: { maxConcurrency: number; rpm: number; queryQps: number };
   imageInput: ImageInputLimits;
-  /** 视频链接有效期（小时），超过后无法下载 */
+  /** 结果在供应商侧保留的时间（小时），超过后无法下载 */
   resultUrlTtlHours: number;
 }
 
@@ -45,6 +48,8 @@ export interface ImageModelCapability {
   maxReferenceImages: number;
   /** 9:16 输出尺寸 */
   portraitSize: string;
+  /** 按档位指定尺寸的模型（如 Nano Banana 的 1K/2K/4K） */
+  imageSize?: string;
   /** 该模型文生图得到的人脸图，是否被同账号视频模型信任（火山：Seedream 5.0 文生图 → Seedance 2.x，30 天内） */
   trustedFaceForVideoProvider?: { provider: string; days: number };
   resultUrlTtlHours: number;
@@ -102,8 +107,10 @@ export interface ShotRenderSpec {
 
 export interface CompiledVideoRequest {
   prompt: string;
-  /** 与提示词中 @图像N 顺序一致 */
+  /** 与提示词中图片编号的顺序一致 */
   images: ImageSourceRef[];
+  /** 镜头时长（秒），各供应商写进请求的格式不同，这里统一记录 */
+  durationSec: number;
   params: Record<string, unknown>;
 }
 
@@ -117,7 +124,11 @@ export type VideoTaskState = 'queued' | 'running' | 'succeeded' | 'failed' | 'ca
 export interface VideoTaskStatus {
   state: VideoTaskState;
   rawStatus: string;
-  videoUrl?: string;
+  /**
+   * 成功时的结果位置，交给 downloadResult 下载：Seedance 是视频链接（24 小时有效）；
+   * Gemini 是 interaction 引用或文件地址。只在服务端使用，不下发前端
+   */
+  resultRef?: string;
   usage?: unknown;
   seed?: number;
   error?: { code: string; message: string };
@@ -129,6 +140,10 @@ export interface VideoProvider {
   createTask(req: VideoCreateRequest): Promise<{ providerTaskId: string }>;
   getTask(providerTaskId: string): Promise<VideoTaskStatus>;
   cancelTask(providerTaskId: string): Promise<'cancelled' | 'not_cancellable'>;
+  /** 下载生成好的视频 */
+  downloadResult(resultRef: string, providerTaskId: string): Promise<Buffer>;
+  /** 转存成功后删除供应商侧保存的请求与结果（可选，失败不影响片段） */
+  cleanup?(providerTaskId: string): Promise<void>;
 }
 
 export interface ImageGenerateRequest {
@@ -182,7 +197,12 @@ export interface Composer {
   render(input: import('@ai-creative/shared').CompositionInput, outFile: string): Promise<void>;
 }
 
+/** 按能力登记表的一项创建适配器（测试中替换为假供应商） */
+export interface ProviderFactory {
+  video(cap: VideoModelCapability): VideoProvider;
+  image(cap: ImageModelCapability): ImageProvider;
+}
+
 export const LLM_PROVIDER = Symbol('LLM_PROVIDER');
-export const VIDEO_PROVIDER = Symbol('VIDEO_PROVIDER');
-export const IMAGE_PROVIDER = Symbol('IMAGE_PROVIDER');
+export const PROVIDER_FACTORY = Symbol('PROVIDER_FACTORY');
 export const COMPOSER = Symbol('COMPOSER');

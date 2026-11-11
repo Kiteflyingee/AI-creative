@@ -41,20 +41,46 @@ const envSchema = z.object({
   S3_FORCE_PATH_STYLE: bool,
   MODEL_IMAGE_TRANSPORT: z.enum(['base64', 'signed_url']).default('base64'),
 
-  LLM_PROVIDER: z.enum(['deepseek', 'ark']).default('deepseek'),
+  /**
+   * 大模型供应商：deepseek = DeepSeek 官方；ark = 火山方舟托管的 DeepSeek；
+   * openai_compatible = 任意 OpenAI 兼容接口（如 Gemini 的 OpenAI 兼容接口），用 LLM_* 配置
+   */
+  LLM_PROVIDER: z.enum(['deepseek', 'ark', 'openai_compatible']).default('deepseek'),
   DEEPSEEK_API_KEY: z.string().default(''),
   DEEPSEEK_BASE_URL: z.string().default('https://api.deepseek.com'),
   DEEPSEEK_MODEL: z.string().default('deepseek-flash'),
   ARK_LLM_MODEL: z.string().default('deepseek-v4-1-flash-261017'),
+  LLM_BASE_URL: z.string().default(''),
+  LLM_API_KEY: z.string().default(''),
+  LLM_MODEL: z.string().default(''),
+  /** 思考开关的写法：deepseek = thinking.type；reasoning_effort = OpenAI 写法；none = 不传 */
+  LLM_THINKING_PARAM: z.enum(['deepseek', 'reasoning_effort', 'none']).default('none'),
+  /** JSON 输出：json_object = response_format.type=json_object；none = 只靠提示词与校验 */
+  LLM_JSON_MODE: z.enum(['json_object', 'none']).default('json_object'),
 
+  /** 系统使用的模型组合（能力登记表键名）。新建项目时记录到项目上，之后该项目一直用这一组 */
+  VIDEO_MODEL: z.string().default('gemini-omni-1.2-flash'),
+  IMAGE_MODEL: z.string().default('nano-banana-2.1'),
+
+  /** 火山方舟（国内）或 BytePlus ModelArk（海外）：两者接口相同，改地址与模型 ID 即可 */
   ARK_API_KEY: z.string().default(''),
   ARK_BASE_URL: z.string().default('https://ark.cn-beijing.volces.com/api/v3'),
-  VIDEO_MODEL: z.string().default('seedance-2.5'),
-  IMAGE_MODEL: z.string().default('seedream-5.0-pro'),
   SEEDANCE_MODEL_ID: z.string().default('doubao-seedance-2-5-260628'),
   SEEDREAM_MODEL_ID: z.string().default('doubao-seedream-5-0-pro-260628'),
-  VIDEO_MAX_CONCURRENCY: z.coerce.number().int().positive().default(3),
-  VIDEO_RPM: z.coerce.number().int().positive().default(180),
+  /** 火山个人账号：并发 3、RPM 180（D-16） */
+  ARK_VIDEO_MAX_CONCURRENCY: z.coerce.number().int().positive().default(3),
+  ARK_VIDEO_RPM: z.coerce.number().int().positive().default(180),
+
+  /** Google Gemini API（Gemini Omni 视频、Nano Banana 图片） */
+  GEMINI_API_KEY: z.string().default(''),
+  GEMINI_BASE_URL: z.string().default('https://generativelanguage.googleapis.com/v1beta'),
+  /** Interactions API 的版本头（Api-Revision）；留空则不发送 */
+  GEMINI_API_REVISION: z.string().default('2026-05-20'),
+  OMNI_MODEL_ID: z.string().default('gemini-omni-1.2-flash'),
+  NANO_BANANA_MODEL_ID: z.string().default('gemini-nano-banana-2.1'),
+  GEMINI_VIDEO_MAX_CONCURRENCY: z.coerce.number().int().positive().default(3),
+  GEMINI_VIDEO_RPM: z.coerce.number().int().positive().default(30),
+
   VIDEO_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(10000),
   VIDEO_TASK_TIMEOUT_MS: z.coerce.number().int().positive().default(30 * 60 * 1000),
   VIRTUAL_PORTRAITS_FILE: z.string().default('config/virtual-portraits.json'),

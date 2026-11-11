@@ -17,8 +17,9 @@ import { checkImageAgainstLimits, readImageMeta, toDataUrl, toJpeg } from '../me
 import { PrismaService } from '../prisma/prisma.service';
 import { ProjectsService } from '../projects/projects.service';
 import { LlmService } from '../providers/llm/llm.service';
-import { selectedImageModel, selectedVideoModel } from '../providers/registry';
-import { IMAGE_PROVIDER, type ImageInput, type ImageProvider } from '../providers/types';
+import { ModelHub } from '../providers/model-hub';
+import { defaultModels, imageCapability, videoCapability } from '../providers/registry';
+import type { ImageInput } from '../providers/types';
 import { JOB_QUEUE, type JobContext, type JobQueue } from '../queue/job-queue';
 import { StorageService } from '../storage/storage.service';
 
@@ -41,7 +42,7 @@ export class AssetsService {
     private readonly storage: StorageService,
     private readonly projects: ProjectsService,
     private readonly llm: LlmService,
-    @Inject(IMAGE_PROVIDER) private readonly images: ImageProvider,
+    private readonly hub: ModelHub,
     @Inject(JOB_QUEUE) private readonly queue: JobQueue,
   ) {}
 
@@ -57,7 +58,7 @@ export class AssetsService {
     if (!file?.buffer?.length) throw badRequest('NO_FILE', '没有收到图片文件');
     const meta = await readImageMeta(file.buffer);
     if (!meta) throw badRequest('IMAGE_INVALID', '无法识别的图片文件');
-    const reason = checkImageAgainstLimits(meta, selectedVideoModel().imageInput);
+    const reason = checkImageAgainstLimits(meta, videoCapability(project.videoModel).imageInput);
     if (reason) throw badRequest('IMAGE_INVALID', reason);
 
     const asset = await this.prisma.asset.create({
@@ -105,9 +106,13 @@ export class AssetsService {
     const asset = await this.requireAsset(userId, assetId);
     if (asset.origin !== 'UPLOAD') throw badRequest('NOT_ALLOWED', 'AI 生成的图片不需要处理人脸');
     if (input.resolution !== 'EXCLUDED' && asset.kind !== 'CHARACTER') {
-      throw badRequest('NOT_ALLOWED', '只有人物图可以换成虚拟人像或 AI 相似人物；商品图、场景图可以选择不用，或让 AI 重新生成');
+      throw badRequest('NOT_ALLOWED', '只有人物图可以换成 AI 相似人物（或虚拟人像）；商品图、场景图可以选择不用，或让 AI 重新生成');
     }
     if (input.resolution === 'VIRTUAL_PORTRAIT') {
+      const { videoModel } = await this.modelsFor(asset);
+      if (!videoCapability(videoModel).virtualPortraits) {
+        throw badRequest('NOT_SUPPORTED', '当前视频模型不支持虚拟人像，请选择 AI 生成相似人物，或不用这张图');
+      }
       const portrait = loadVirtualPortraits().find((p) => p.id === input.virtualPortraitId);
       if (!portrait) throw badRequest('PORTRAIT_NOT_FOUND', '没有找到这个虚拟人像');
       return this.projects.assetView(
@@ -206,11 +211,12 @@ export class AssetsService {
       if (!prompt) throw new Error('缺少图片提示词');
 
       // 人脸图只用文生图生成（火山只信任同账号文生图产物中的人脸）
-      const result = await this.images.generate({ prompt, images: inputs });
+      const { imageModel } = await this.modelsFor(asset);
+      const result = await this.hub.image(imageModel).generate({ prompt, images: inputs });
       const meta = await readImageMeta(result.data);
-      const objectKey = `users/${asset.userId}/generated/${asset.id}.jpg`;
+      const objectKey = `users/${asset.userId}/generated/${asset.id}.${EXT[result.mime] ?? 'img'}`;
       await this.storage.putBuffer(objectKey, result.data, result.mime);
-      const cap = selectedImageModel();
+      const cap = imageCapability(imageModel);
       const now = new Date();
       await this.prisma.asset.update({
         where: { id: asset.id },
@@ -336,6 +342,16 @@ export class AssetsService {
 
   async touch(projectId: string) {
     await this.prisma.project.update({ where: { id: projectId }, data: { updatedAt: new Date() } }).catch(() => undefined);
+  }
+
+  /** 图片所属项目的模型组合（D-46）；找不到项目时用当前配置 */
+  private async modelsFor(asset: Pick<Asset, 'projectId' | 'productId'>): Promise<{ videoModel: string; imageModel: string }> {
+    const project = asset.projectId
+      ? await this.prisma.project.findUnique({ where: { id: asset.projectId } })
+      : asset.productId
+        ? await this.prisma.project.findFirst({ where: { productId: asset.productId } })
+        : null;
+    return project ? { videoModel: project.videoModel, imageModel: project.imageModel } : defaultModels();
   }
 }
 

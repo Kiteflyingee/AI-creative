@@ -14,10 +14,12 @@ async function main() {
       where: projectId ? { projectId } : undefined,
       orderBy: { createdAt: 'desc' },
       take: projectId ? 50 : 10,
-      include: { clips: { orderBy: { queuedAt: 'asc' } }, project: { select: { title: true } } },
+      include: { clips: { orderBy: { queuedAt: 'asc' } }, project: { select: { title: true, videoModel: true, imageModel: true } } },
     });
     for (const job of jobs) {
-      console.log(`\n任务 ${job.id} · ${job.project.title} · ${job.kind} · ${job.status} · ${job.resolution} · ${job.createdAt.toISOString()}`);
+      console.log(
+        `\n任务 ${job.id} · ${job.project.title} · ${job.kind} · ${job.status} · ${job.resolution} · 模型 ${job.clips[0]?.modelKey ?? job.project.videoModel} / ${job.project.imageModel} · ${job.createdAt.toISOString()}`,
+      );
       if (job.errorMessage) console.log(`  说明：${job.errorMessage}`);
       for (const c of job.clips) {
         const usage = c.usage ? JSON.stringify(c.usage) : '-';

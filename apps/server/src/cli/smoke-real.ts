@@ -3,9 +3,10 @@
  *
  *   npm run smoke:real -w @ai-creative/server -- --image /path/to/product.jpg --yes
  *
- * 流程：DeepSeek 素材理解 → 故事线 → 故事板（Seedream 生成人物、场景图）→ 只保留 2 个 4 秒镜头
- *      → Seedance 480p 生成 → Remotion 合成 → 重做第 2 个镜头 → 再合成。
- * 视频调用 3 次 × 4 秒 × 480p，按 06 §8.4 估算约 8.06 元；另有 Seedream 1–2 张（约 0.3 元/张）和少量 DeepSeek 费用。
+ * 使用 .env 里配置的模型组合（VIDEO_MODEL / IMAGE_MODEL）。
+ * 流程：大模型素材理解 → 故事线 → 故事板（图片模型生成人物、场景图）→ 只保留 2 个最短时长的镜头
+ *      → 视频模型以最低分辨率生成 → Remotion 合成 → 重做第 2 个镜头 → 再合成。
+ * 视频调用 3 次。费用估算见下方 PRICE（Seedance 按 06 §8.4；Omni 按 06 §14 的官方单价折算）。
  * 要用真实的公网存储时，把 MODEL_IMAGE_TRANSPORT 改为 signed_url。
  */
 import 'reflect-metadata';
@@ -21,29 +22,56 @@ import { GenerationService } from '../generation/generation.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProductsService } from '../products/products.service';
 import { ProjectsService } from '../projects/projects.service';
+import { allowedValues } from '@ai-creative/shared';
+import { defaultModels, imageCapability, videoCapability } from '../providers/registry';
 import { InlineRunner } from './inline-runner';
 
 const VIDEO_CALLS = 3;
-const SHOT_SEC = 4;
-const PRICE_480P_PER_SEC = 0.672;
+/** 最低分辨率的每秒单价（只用于冒烟前的费用提示，产品内不计算费用，D-32） */
+const PRICE: Record<string, { perSec: number; currency: string; note: string }> = {
+  'seedance-2.5': { perSec: 0.672, currency: '元', note: '480p，06 §8.4' },
+  'gemini-omni-1.2-flash': { perSec: 0.0695, currency: '美元', note: '720p，06 §14' },
+};
 
 function arg(name: string) {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
+/** 检查用到的供应商是否都配置了密钥 */
+function missingKeys(providers: string[]): string[] {
+  const env = getEnv();
+  const missing: string[] = [];
+  if (providers.includes('volcengine-ark') && !env.ARK_API_KEY) missing.push('ARK_API_KEY');
+  if (providers.includes('google-gemini') && !env.GEMINI_API_KEY) missing.push('GEMINI_API_KEY');
+  if (env.LLM_PROVIDER === 'deepseek' && !env.DEEPSEEK_API_KEY) missing.push('DEEPSEEK_API_KEY');
+  if (env.LLM_PROVIDER === 'ark' && !env.ARK_API_KEY) missing.push('ARK_API_KEY');
+  if (env.LLM_PROVIDER === 'openai_compatible' && !env.LLM_API_KEY) missing.push('LLM_API_KEY');
+  return [...new Set(missing)];
+}
+
 async function main() {
   const runner = new InlineRunner();
-  const env = getEnv();
   const image = arg('--image');
-  const estimate = VIDEO_CALLS * SHOT_SEC * PRICE_480P_PER_SEC;
-  console.log(`预计视频费用：${VIDEO_CALLS} 次 × ${SHOT_SEC} 秒 × 480p ≈ ${estimate.toFixed(2)} 元（另有少量图片与大模型费用）`);
+  const models = defaultModels();
+  const video = videoCapability(models.videoModel);
+  const imageModel = imageCapability(models.imageModel);
+  const resolution = video.resolutions[0]!;
+  const shotSec = allowedValues(video.duration)[0]!;
+  const price = PRICE[video.key];
+  console.log(`模型组合：视频 ${video.label}，图片 ${imageModel.label}`);
+  console.log(
+    price
+      ? `预计视频费用：${VIDEO_CALLS} 次 × ${shotSec} 秒 × ${resolution} ≈ ${(VIDEO_CALLS * shotSec * price.perSec).toFixed(2)} ${price.currency}（${price.note}；另有少量图片与大模型费用）`
+      : `没有 ${video.label} 的单价，请先查官方价格再执行`,
+  );
   if (!process.argv.includes('--yes')) {
     console.log('未加 --yes，已退出。确认预算后再执行。');
     return;
   }
   if (!image) throw new Error('请用 --image 指定一张真实的商品图');
-  if (!env.ARK_API_KEY || (env.LLM_PROVIDER === 'deepseek' && !env.DEEPSEEK_API_KEY)) throw new Error('请先在 .env 中填写 ARK_API_KEY 与 DeepSeek 密钥');
+  const missing = missingKeys([video.provider, imageModel.provider]);
+  if (missing.length) throw new Error(`请先在 .env 中填写：${missing.join('、')}`);
 
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['log', 'warn', 'error'] });
   runner.attach(app);
@@ -65,16 +93,16 @@ async function main() {
     const boards = app.get(StoryboardService);
     const board = await boards.generateFromStoryline(user.id, lines[0]!.id);
     await runner.drain();
-    // 只保留前 2 个镜头、每个 4 秒，控制费用
+    // 只保留前 2 个镜头、每个用最短时长，控制费用
     const spec = structuredClone(board.spec);
-    spec.shots = spec.shots.slice(0, 2).map((s) => ({ ...s, durationSec: SHOT_SEC }));
+    spec.shots = spec.shots.slice(0, 2).map((s) => ({ ...s, durationSec: shotSec }));
     const trimmed = await boards.saveVersion(user.id, projectId, spec, { note: '冒烟测试：只保留 2 个镜头' });
 
     const generation = app.get(GenerationService);
-    const job = await generation.create(user.id, projectId, { resolution: '480p', idempotencyKey: `smoke-${Date.now()}`, storyboardVersion: trimmed.version });
+    const job = await generation.create(user.id, projectId, { resolution, idempotencyKey: `smoke-${Date.now()}`, storyboardVersion: trimmed.version });
     await runner.runJob(job.id);
     const redo = await generation.create(user.id, projectId, {
-      resolution: '480p',
+      resolution,
       shotIds: [spec.shots[1]!.shotId],
       idempotencyKey: `smoke-redo-${Date.now()}`,
     });

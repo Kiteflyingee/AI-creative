@@ -190,6 +190,9 @@ model Project {
   productId       String
   product         Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
   title           String          @default("")
+  /// 新建项目时按配置记录的模型组合（能力登记表键名），之后该项目一直用这一组（D-46）
+  videoModel      String
+  imageModel      String
   currentOutputId String?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
@@ -285,7 +288,7 @@ model Clip {
   seed              BigInt?
   errorCode         String?
   errorMessage      String?
-  /// 供应商结果链接（只保存 24 小时，转存后清空，不对前端暴露）
+  /// 供应商结果位置（Seedance 为 24 小时有效的链接；Gemini 为 interaction 引用），转存后清空，不对前端暴露
   providerVideoUrl  String?
   rawObjectKey      String?
   objectKey         String?

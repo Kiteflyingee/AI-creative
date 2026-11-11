@@ -2,8 +2,8 @@ import { getEnv } from '../config/env';
 import type { ImageModelCapability, VideoModelCapability } from './types';
 
 /**
- * 模型能力登记表（D-39）。新增模型时在这里登记能力，并实现对应的适配器。
- * 数据来源：docs/06-模型能力与约束.md（火山方舟官方文档，2026-11-10 查询）。
+ * 模型能力登记表（D-39）。新增模型时在这里登记能力，并在 providers/factory.ts 里登记适配器。
+ * 数据来源：docs/06-模型能力与约束.md（火山方舟、Google Gemini API 官方文档）。
  */
 export function videoModelRegistry(): Record<string, VideoModelCapability> {
   const env = getEnv();
@@ -24,8 +24,10 @@ export function videoModelRegistry(): Record<string, VideoModelCapability> {
       supportsExtend: true,
       canDisableWatermark: true,
       faceInput: 'asset_or_trusted',
-      regions: ['cn'],
-      limits: { maxConcurrency: env.VIDEO_MAX_CONCURRENCY, rpm: env.VIDEO_RPM, queryQps: 20 },
+      virtualPortraits: true,
+      // 国内走火山方舟；海外走 BytePlus ModelArk（改 ARK_BASE_URL 与模型 ID，未实测）
+      regions: ['cn', 'ap-southeast'],
+      limits: { maxConcurrency: env.ARK_VIDEO_MAX_CONCURRENCY, rpm: env.ARK_VIDEO_RPM, queryQps: 20 },
       imageInput: {
         formats: ['jpeg', 'png', 'webp', 'bmp', 'tiff', 'gif'],
         minSide: 300,
@@ -34,6 +36,41 @@ export function videoModelRegistry(): Record<string, VideoModelCapability> {
         maxRatio: 2.5,
         maxBytes: 30 * 1024 * 1024,
       },
+      resultUrlTtlHours: 24,
+    },
+    'gemini-omni-1.2-flash': {
+      key: 'gemini-omni-1.2-flash',
+      label: 'Gemini Omni 1.2 Flash',
+      provider: 'google-gemini',
+      modelId: env.OMNI_MODEL_ID,
+      // 官方：3–15 秒（默认 10 秒）；与 Seedance 一样按单镜头 5 秒左右规划
+      duration: { min: 3, max: 15, recommended: 5 },
+      // 官方另有 360p 与 4K；按 D-07 只开放 720p / 1080p（没有 480p）
+      resolutions: ['720p', '1080p'],
+      aspectRatios: ['16:9', '9:16'],
+      // 官方：最多 6 张参考图，每个角色最多 3 张、最多 2 个角色
+      maxReferenceImages: 6,
+      supportsFirstLastFrame: true,
+      generatesAudio: true,
+      supportsEdit: true,
+      supportsExtend: true,
+      // 没有可见水印（只有不可见的 SynthID），无需关闭
+      canDisableWatermark: true,
+      // 官方：不接受含“某些可识别真人”的图片；商家上传的真人脸图一律不发送（D-28）
+      faceInput: 'reject',
+      virtualPortraits: false,
+      regions: ['global'],
+      limits: { maxConcurrency: env.GEMINI_VIDEO_MAX_CONCURRENCY, rpm: env.GEMINI_VIDEO_RPM, queryQps: 5 },
+      // 官方没有写明参考图尺寸限制，按保守值登记；发送前统一转成 JPEG（最长边 2048）
+      imageInput: {
+        formats: ['jpeg', 'png', 'webp'],
+        minSide: 300,
+        maxSide: 6000,
+        minRatio: 0.4,
+        maxRatio: 2.5,
+        maxBytes: 30 * 1024 * 1024,
+      },
+      // 免费层 interaction 只保留 1 天，付费层 55 天；按 1 天登记
       resultUrlTtlHours: 24,
     },
   };
@@ -55,19 +92,44 @@ export function imageModelRegistry(): Record<string, ImageModelCapability> {
       trustedFaceForVideoProvider: { provider: 'volcengine-ark', days: 30 },
       resultUrlTtlHours: 24,
     },
+    'nano-banana-2.1': {
+      key: 'nano-banana-2.1',
+      label: 'Nano Banana 2.1',
+      provider: 'google-gemini',
+      modelId: env.NANO_BANANA_MODEL_ID,
+      textToImage: true,
+      imageToImage: true,
+      // 官方：最多 14 张输入图
+      maxReferenceImages: 14,
+      // 1K 档 9:16 的官方尺寸
+      portraitSize: '768x1376',
+      imageSize: '1K',
+      // 结果直接以 Base64 返回，没有链接
+      resultUrlTtlHours: 0,
+    },
   };
 }
 
-export function selectedVideoModel(): VideoModelCapability {
-  const key = getEnv().VIDEO_MODEL;
+export function videoCapability(key: string): VideoModelCapability {
   const cap = videoModelRegistry()[key];
   if (!cap) throw new Error(`未登记的视频模型：${key}`);
   return cap;
 }
 
-export function selectedImageModel(): ImageModelCapability {
-  const key = getEnv().IMAGE_MODEL;
+export function imageCapability(key: string): ImageModelCapability {
   const cap = imageModelRegistry()[key];
   if (!cap) throw new Error(`未登记的图片模型：${key}`);
   return cap;
+}
+
+/** 按模型 ID 反查图片模型（用于判断 AI 人物图由哪个模型生成） */
+export function imageCapabilityByModelId(modelId: string | null | undefined): ImageModelCapability | undefined {
+  if (!modelId) return undefined;
+  return Object.values(imageModelRegistry()).find((c) => c.modelId === modelId);
+}
+
+/** 当前配置的模型组合；新建项目时使用 */
+export function defaultModels(): { videoModel: string; imageModel: string } {
+  const env = getEnv();
+  return { videoModel: videoCapability(env.VIDEO_MODEL).key, imageModel: imageCapability(env.IMAGE_MODEL).key };
 }

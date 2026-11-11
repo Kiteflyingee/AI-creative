@@ -1,6 +1,6 @@
 import { getEnv } from '../../config/env';
 import { ProviderError } from '../../common/errors';
-import { httpJson } from '../http';
+import { httpDownload, httpJson } from '../http';
 import {
   imageInputToUrl,
   type CompiledVideoRequest,
@@ -150,7 +150,7 @@ export class SeedanceProvider implements VideoProvider {
     };
     // 全模态参考生视频：参考图模式可以指定 9:16（官方示例在请求体顶层传 omni_reference_task_type）
     if (images.length > 0) params.omni_reference_task_type = 'reference';
-    return { prompt, images, params };
+    return { prompt, images, durationSec: spec.durationSec, params };
   }
 
   buildBody(req: VideoCreateRequest): Record<string, unknown> {
@@ -206,6 +206,11 @@ export class SeedanceProvider implements VideoProvider {
       throw err;
     }
   }
+
+  /** 结果是 24 小时有效的公开链接 */
+  downloadResult(resultRef: string): Promise<Buffer> {
+    return httpDownload(resultRef, 10 * 60_000);
+  }
 }
 
 export function parseArkTask(res: ArkTaskResponse): VideoTaskStatus {
@@ -213,7 +218,7 @@ export function parseArkTask(res: ArkTaskResponse): VideoTaskStatus {
   return {
     state,
     rawStatus: res.status ?? 'missing',
-    videoUrl: res.content?.video_url,
+    resultRef: res.content?.video_url,
     usage: res.usage,
     seed: typeof res.seed === 'number' ? res.seed : undefined,
     error:

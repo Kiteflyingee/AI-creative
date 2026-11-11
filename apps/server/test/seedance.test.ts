@@ -1,4 +1,4 @@
-import { selectedVideoModel } from '../src/providers/registry';
+import { videoCapability } from '../src/providers/registry';
 import type { ShotRenderSpec } from '../src/providers/types';
 import { compileSeedancePrompt, mapArkStatus, parseArkTask, sanitizePromptText, SeedanceProvider } from '../src/providers/video/seedance';
 
@@ -81,7 +81,7 @@ describe('Seedance 提示词编译', () => {
 });
 
 describe('Seedance 请求', () => {
-  const provider = new SeedanceProvider(selectedVideoModel());
+  const provider = new SeedanceProvider(videoCapability('seedance-2.5'));
 
   it('参考图模式：9:16、关闭水印、生成声音、指定时长与分辨率', () => {
     const compiled = provider.compile(spec());
@@ -123,7 +123,7 @@ describe('Seedance 请求', () => {
       usage: { completion_tokens: 246840, total_tokens: 246840 },
       seed: 58944,
     });
-    expect(status).toMatchObject({ state: 'succeeded', videoUrl: 'https://ark-content-generation.example/xxx', seed: 58944 });
+    expect(status).toMatchObject({ state: 'succeeded', resultRef: 'https://ark-content-generation.example/xxx', seed: 58944 });
     expect(parseArkTask({ id: 'x', status: 'failed', error: { code: 'E', message: 'm' } }).error).toEqual({ code: 'E', message: 'm' });
     expect(mapArkStatus('queued')).toBe('queued');
     expect(mapArkStatus('running')).toBe('running');

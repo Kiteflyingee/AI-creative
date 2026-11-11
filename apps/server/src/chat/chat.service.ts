@@ -4,9 +4,11 @@ import {
   SHOT_FIELD_LABELS,
   STORY_DURATIONS,
   storyboardSpecSchema,
+  type DurationRule,
   type Shot,
   type StoryboardSpec,
 } from '@ai-creative/shared';
+import type { Project } from '@prisma/client';
 import { z } from 'zod';
 import { badRequest, conflict, notFound } from '../common/errors';
 import { shortId } from '../common/util';
@@ -18,7 +20,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ProductsService } from '../products/products.service';
 import { ProjectsService } from '../projects/projects.service';
 import { LlmService } from '../providers/llm/llm.service';
-import { selectedVideoModel } from '../providers/registry';
+import { videoCapability } from '../providers/registry';
 
 export const CHAT_PAGES = ['product', 'storylines', 'storyboard', 'work'] as const;
 export type ChatPage = (typeof CHAT_PAGES)[number];
@@ -123,7 +125,7 @@ export class ChatService {
   /** 把一句话转成修改提案（不改数据），商家看过对比后点“应用”才生效（D-24） */
   async propose(userId: string, projectId: string, page: ChatPage, message: string) {
     const project = await this.projects.requireProject(userId, projectId);
-    const context = await this.pageContext(project.id, project.productId, page);
+    const context = await this.pageContext(project, page);
     const schema = z.object({
       reply: z.string().default(''),
       operations: z.array(OPS[page]).max(20).default([]),
@@ -200,7 +202,7 @@ export class ChatService {
         const ops = items as StoryboardOp[];
         const specOps = ops.filter((o) => !['regenerate_reference', 'back_to_storylines'].includes(o.op));
         if (specOps.length) {
-          const next = applyStoryboardOps(latest.spec, specOps);
+          const next = applyStoryboardOps(latest.spec, specOps, videoCapability(project.videoModel).duration);
           await this.storyboards.saveVersion(userId, project.id, next, { note: `对话修改：${edit.message.slice(0, 40)}`, expectedVersion: latest.row.version });
         }
         for (const op of ops) {
@@ -242,9 +244,10 @@ export class ChatService {
     return { ok: true, ...result };
   }
 
-  private async pageContext(projectId: string, productId: string, page: ChatPage): Promise<{ version: number | null; data: unknown }> {
+  private async pageContext(project: Project, page: ChatPage): Promise<{ version: number | null; data: unknown }> {
+    const projectId = project.id;
     if (page === 'product') {
-      const product = await this.prisma.product.findUniqueOrThrow({ where: { id: productId }, include: { facts: true } });
+      const product = await this.prisma.product.findUniqueOrThrow({ where: { id: project.productId }, include: { facts: true } });
       return {
         version: null,
         data: {
@@ -261,7 +264,7 @@ export class ChatService {
     if (!latest) throw badRequest('NO_STORYBOARD', '还没有故事板');
     const data: Record<string, unknown> = {
       totalDurationSec: latest.spec.durationSec,
-      shotDurationRule: selectedVideoModel().duration,
+      shotDurationRule: videoCapability(project.videoModel).duration,
       styleProfile: latest.spec.styleProfile,
       voiceProfile: latest.spec.voiceProfile,
       references: latest.spec.references.map((r) => ({ refId: r.refId, kind: r.kind, name: r.name, description: r.description })),
@@ -416,9 +419,8 @@ function cleanChanges(changes: Record<string, string | undefined> | undefined): 
 }
 
 /** 在故事板副本上依次执行修改操作（纯函数，便于测试） */
-export function applyStoryboardOps(spec: StoryboardSpec, ops: StoryboardOp[]): StoryboardSpec {
+export function applyStoryboardOps(spec: StoryboardSpec, ops: StoryboardOp[], rule: DurationRule): StoryboardSpec {
   let next = structuredClone(spec);
-  const cap = selectedVideoModel();
   for (const op of ops) {
     const idx = (id: string) => next.shots.findIndex((s) => s.shotId === id);
     switch (op.op) {
@@ -432,7 +434,7 @@ export function applyStoryboardOps(spec: StoryboardSpec, ops: StoryboardOp[]): S
         const shot: Shot = {
           shotId: shortId('shot'),
           purpose: '',
-          durationSec: op.durationSec ?? cap.duration.recommended,
+          durationSec: op.durationSec ?? rule.recommended,
           subject: '',
           videoType: '',
           camera: '',
@@ -458,7 +460,7 @@ export function applyStoryboardOps(spec: StoryboardSpec, ops: StoryboardOp[]): S
         break;
       }
       case 'set_total_duration':
-        next = applyTotalDuration(next, op.durationSec);
+        next = applyTotalDuration(next, op.durationSec, rule);
         break;
       case 'set_shot_refs':
         next.shots[idx(op.shotId)]!.refIds = op.refIds;

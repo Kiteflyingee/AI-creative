@@ -92,7 +92,7 @@ export class CreativeController {
   async readiness(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body(new ZodPipe(z.object({ shotIds: z.array(z.string()).optional() }))) body: { shotIds?: string[] }) {
     const { spec, row } = await this.storyboards.requireLatest(user.id, id);
     const shotIds = body.shotIds?.length ? body.shotIds : spec.shots.map((s) => s.shotId);
-    return { version: row.version, problems: await this.storyboards.checkReadiness(user.id, spec, shotIds) };
+    return { version: row.version, problems: await this.storyboards.checkReadiness(user.id, spec, shotIds, row.videoModel) };
   }
 
   @Post('projects/:id/chat')

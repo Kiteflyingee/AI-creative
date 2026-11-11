@@ -13,11 +13,11 @@ import { AppModule } from '../src/app.module';
 import { RemotionComposer } from '../src/compose/remotion.composer';
 import { GenerationService } from '../src/generation/generation.service';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { COMPOSER, IMAGE_PROVIDER, LLM_PROVIDER, VIDEO_PROVIDER, type LlmRequest } from '../src/providers/types';
+import { COMPOSER, LLM_PROVIDER, PROVIDER_FACTORY, type LlmRequest } from '../src/providers/types';
 import { JOB_QUEUE } from '../src/queue/job-queue';
 import { buildProcessors } from '../src/queue/processors';
 import { StorageService } from '../src/storage/storage.service';
-import { FakeImageProvider, FakeLlm, FakeVideoProvider, InlineJobQueue } from './fakes';
+import { FakeLlm, FakeProviderFactory, InlineJobQueue } from './fakes';
 
 const PORT = Number(process.env.E2E_PORT ?? 3101);
 
@@ -46,7 +46,6 @@ async function main() {
     }
     return { reply: '', operations: [], clarification: '请说清楚要改哪里、改成什么样' };
   });
-  const video = new FakeVideoProvider(storage);
   const queue = new InlineJobQueue();
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
@@ -54,10 +53,8 @@ async function main() {
     .useValue(storage)
     .overrideProvider(LLM_PROVIDER)
     .useValue(llm)
-    .overrideProvider(VIDEO_PROVIDER)
-    .useValue(video)
-    .overrideProvider(IMAGE_PROVIDER)
-    .useValue(new FakeImageProvider())
+    .overrideProvider(PROVIDER_FACTORY)
+    .useValue(new FakeProviderFactory(storage))
     .overrideProvider(COMPOSER)
     .useValue(new RemotionComposer())
     .overrideProvider(JOB_QUEUE)

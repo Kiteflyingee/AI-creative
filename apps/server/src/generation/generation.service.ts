@@ -10,15 +10,8 @@ import { getEnv, repoPath } from '../config/env';
 import { shotSpecHash, StoryboardService } from '../creative/storyboard.service';
 import { normalizeClip, probe } from '../media/ffmpeg';
 import { PrismaService } from '../prisma/prisma.service';
-import { httpDownload } from '../providers/http';
-import {
-  VIDEO_PROVIDER,
-  type CompiledVideoRequest,
-  type ImageInput,
-  type ImageSourceRef,
-  type ShotRenderSpec,
-  type VideoProvider,
-} from '../providers/types';
+import { ModelHub } from '../providers/model-hub';
+import type { CompiledVideoRequest, ImageInput, ImageSourceRef, ShotRenderSpec, VideoProvider } from '../providers/types';
 import { JOB_QUEUE, type JobContext, type JobQueue } from '../queue/job-queue';
 import { StorageService } from '../storage/storage.service';
 import { OutputsService } from './outputs.service';
@@ -28,6 +21,8 @@ const IN_FLIGHT: ClipStatus[] = ['SUBMITTING', 'SUBMITTED', 'RUNNING'];
 const MAX_SUBMIT_ATTEMPTS = 5;
 /** 提交中途进程退出，无法确认供应商是否已创建任务：超过这个时间标为失败，避免重复提交产生重复费用 */
 const SUBMITTING_STALE_MS = 5 * 60_000;
+/** 每轮调度最多查看的排队片段数 */
+const DISPATCH_SCAN = 100;
 
 export interface ClipRequest {
   spec: ShotRenderSpec;
@@ -37,8 +32,8 @@ export interface ClipRequest {
 /** 供应商常见错误转成商家能看懂的说明 */
 export function friendlyProviderError(code: string, message: string): string {
   const text = `${code} ${message}`;
-  if (/face|人脸|portrait|肖像/i.test(text)) return '参考图中可能含有真人人脸，视频模型拒绝了这张图。请把人物图换成虚拟人像、AI 相似人物，或不用这张图后重试';
-  if (/sensitive|审核|risk|policy|inappropriate|违规/i.test(text)) return '内容未通过视频模型的安全审核，请修改画面描述或参考图后重试';
+  if (/face|人脸|portrait|肖像|recognizable|celebrit/i.test(text)) return '参考图中可能含有真人人脸，视频模型拒绝了这张图。请把人物图换成 AI 相似人物（或虚拟人像），或不用这张图后重试';
+  if (/sensitive|审核|risk|policy|inappropriate|违规|safety|blocked|prohibited/i.test(text)) return '内容未通过视频模型的安全审核，请修改画面描述或参考图后重试';
   if (/TaskTypeMismatch|TaskTypeConstraint/i.test(text)) return '视频模型判断的任务类型与参数不一致，请修改镜头描述后重试';
   return `视频生成失败：${message}`;
 }
@@ -53,9 +48,18 @@ export class GenerationService {
     private readonly assets: AssetsService,
     private readonly storage: StorageService,
     private readonly outputs: OutputsService,
-    @Inject(VIDEO_PROVIDER) private readonly video: VideoProvider,
+    private readonly hub: ModelHub,
     @Inject(JOB_QUEUE) private readonly queue: JobQueue,
   ) {}
+
+  /** 片段记录了生成它的模型；模型已从登记表移除时返回 null */
+  private providerFor(clip: Clip): VideoProvider | null {
+    try {
+      return this.hub.video(clip.modelKey);
+    } catch {
+      return null;
+    }
+  }
 
   /**
    * 商家在生成确认页确认后创建任务（D-41）：一个镜头一个片段，片段版本只增不改。
@@ -78,7 +82,9 @@ export class GenerationService {
     if (input.storyboardVersion !== undefined && input.storyboardVersion !== row.version) {
       throw conflict('STORYBOARD_CHANGED', '故事板已经更新，请返回确认页重新确认');
     }
-    const cap = this.video.capability;
+    // 用故事板记录的模型（即项目的模型组合，D-46），不随配置变化，也不自动换模型（D-48）
+    const video = this.hub.video(row.videoModel);
+    const cap = video.capability;
     if (!cap.resolutions.includes(input.resolution)) throw badRequest('RESOLUTION_INVALID', '不支持这个分辨率');
     const allIds = spec.shots.map((s) => s.shotId);
     const shotIds = input.shotIds?.length ? [...new Set(input.shotIds)] : allIds;
@@ -90,12 +96,12 @@ export class GenerationService {
     });
     if (active) throw conflict('JOB_ACTIVE', '上一个生成任务还没完成，请等它结束后再生成');
 
-    const problems = await this.storyboards.checkReadiness(userId, spec, shotIds);
+    const problems = await this.storyboards.checkReadiness(userId, spec, shotIds, cap.key);
     if (problems.length) throw badRequest('NOT_READY', problems.join('；'), problems);
 
     const project = await this.prisma.project.findUniqueOrThrow({ where: { id: projectId }, include: { product: true } });
     const renderSpecs = await this.storyboards.buildShotSpecs(userId, spec, shotIds, input.resolution, project.product.name);
-    const requests = renderSpecs.map<ClipRequest>((s) => ({ spec: s, compiled: this.video.compile(s) }));
+    const requests = renderSpecs.map<ClipRequest>((s) => ({ spec: s, compiled: video.compile(s) }));
 
     const ordered = allIds.filter((id) => shotIds.includes(id));
     try {
@@ -205,7 +211,10 @@ export class GenerationService {
         if (res.count) cancelled++;
         else running++;
       } else if (clip.status === 'SUBMITTED' && clip.providerTaskId) {
-        const result = await this.video.cancelTask(clip.providerTaskId).catch(() => 'not_cancellable' as const);
+        const provider = this.providerFor(clip);
+        const result = provider
+          ? await provider.cancelTask(clip.providerTaskId).catch(() => 'not_cancellable' as const)
+          : ('not_cancellable' as const);
         if (result === 'cancelled') {
           await this.prisma.clip.update({ where: { id: clip.id }, data: { status: 'CANCELLED', finishedAt: new Date() } });
           cancelled++;
@@ -235,22 +244,26 @@ export class GenerationService {
   }
 
   private async pollActive() {
-    const cap = this.video.capability;
     const env = getEnv();
     const clips = await this.prisma.clip.findMany({
       where: { status: { in: ['SUBMITTED', 'RUNNING'] }, providerTaskId: { not: null } },
       orderBy: [{ lastPolledAt: { sort: 'asc', nulls: 'first' } }],
       take: 50,
     });
-    const gap = Math.ceil(1000 / Math.max(1, cap.limits.queryQps - 2));
     for (const clip of clips) {
+      const video = this.providerFor(clip);
+      if (!video) {
+        await this.finishClip(clip, 'FAILED', 'MODEL_UNAVAILABLE', `视频模型 ${clip.modelKey} 已不可用`);
+        continue;
+      }
+      const gap = Math.ceil(1000 / Math.max(1, video.capability.limits.queryQps - 2));
       if (clip.submittedAt && Date.now() - clip.submittedAt.getTime() > env.VIDEO_TASK_TIMEOUT_MS) {
-        await this.video.cancelTask(clip.providerTaskId!).catch(() => undefined);
+        await video.cancelTask(clip.providerTaskId!).catch(() => undefined);
         await this.finishClip(clip, 'FAILED', 'TIMEOUT', `视频生成超时（超过 ${Math.round(env.VIDEO_TASK_TIMEOUT_MS / 60000)} 分钟）`);
         continue;
       }
       try {
-        const status = await this.video.getTask(clip.providerTaskId!);
+        const status = await video.getTask(clip.providerTaskId!);
         const data: Prisma.ClipUpdateInput = { lastPolledAt: new Date(), rawStatus: status.rawStatus };
         switch (status.state) {
           case 'queued':
@@ -261,7 +274,7 @@ export class GenerationService {
             await this.aggregate(clip.jobId);
             break;
           case 'succeeded':
-            if (!status.videoUrl) {
+            if (!status.resultRef) {
               await this.finishClip(clip, 'FAILED', 'NO_VIDEO_URL', '视频模型没有返回视频');
               break;
             }
@@ -270,7 +283,7 @@ export class GenerationService {
               data: {
                 ...data,
                 status: 'TRANSFERRING',
-                providerVideoUrl: status.videoUrl,
+                providerVideoUrl: status.resultRef,
                 usage: (status.usage ?? undefined) as Prisma.InputJsonValue | undefined,
                 seed: status.seed !== undefined ? BigInt(status.seed) : undefined,
               },
@@ -306,26 +319,42 @@ export class GenerationService {
     }
   }
 
+  /**
+   * 把排队的片段提交到空出的并发位。并发数与每分钟请求数按供应商账号分别计算（D-45）：
+   * 一家供应商满了，不影响其他供应商的片段提交。
+   */
   private async dispatch() {
-    const cap = this.video.capability;
-    const inFlight = await this.prisma.clip.count({ where: { status: { in: IN_FLIGHT } } });
-    let free = cap.limits.maxConcurrency - inFlight;
-    if (free <= 0) return;
-    const recent = await this.prisma.clip.count({ where: { submittedAt: { gt: new Date(Date.now() - 60_000) } } });
-    free = Math.min(free, cap.limits.rpm - recent);
-    if (free <= 0) return;
+    const since = new Date(Date.now() - 60_000);
+    const [inFlight, recent] = await Promise.all([
+      this.prisma.clip.groupBy({ by: ['provider'], where: { status: { in: IN_FLIGHT } }, _count: { _all: true } }),
+      this.prisma.clip.groupBy({ by: ['provider'], where: { submittedAt: { gt: since } }, _count: { _all: true } }),
+    ]);
+    const used = (rows: typeof inFlight, provider: string) => rows.find((r) => r.provider === provider)?._count._all ?? 0;
     const candidates = await this.prisma.clip.findMany({
       where: { status: 'QUEUED', OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }] },
       orderBy: { queuedAt: 'asc' },
-      take: free,
+      take: DISPATCH_SCAN,
     });
+    const free = new Map<string, number>();
     for (const clip of candidates) {
+      const video = this.providerFor(clip);
+      if (!video) {
+        await this.finishClip(clip, 'FAILED', 'MODEL_UNAVAILABLE', `视频模型 ${clip.modelKey} 已不可用`);
+        continue;
+      }
+      const { provider, limits } = video.capability;
+      if (!free.has(provider)) {
+        free.set(provider, Math.min(limits.maxConcurrency - used(inFlight, provider), limits.rpm - used(recent, provider)));
+      }
+      const slots = free.get(provider)!;
+      if (slots <= 0) continue;
       const claimed = await this.prisma.clip.updateMany({
         where: { id: clip.id, status: 'QUEUED' },
         data: { status: 'SUBMITTING', submittedAt: new Date() },
       });
       if (!claimed.count) continue;
-      await this.submit(clip);
+      free.set(provider, slots - 1);
+      await this.submit(clip, video);
     }
   }
 
@@ -334,11 +363,11 @@ export class GenerationService {
     return this.assets.toModelImage(ref.assetId);
   }
 
-  private async submit(clip: Clip) {
+  private async submit(clip: Clip, video: VideoProvider) {
     const request = clip.request as unknown as ClipRequest;
     try {
       const images = await Promise.all(request.compiled.images.map((ref) => this.resolveImage(ref)));
-      const { providerTaskId } = await this.video.createTask({ compiled: request.compiled, images });
+      const { providerTaskId } = await video.createTask({ compiled: request.compiled, images });
       await this.prisma.clip.update({
         where: { id: clip.id },
         data: { status: 'SUBMITTED', providerTaskId, submittedAt: new Date(), submitAttempts: { increment: 1 } },
@@ -380,17 +409,23 @@ export class GenerationService {
     await this.aggregate(clip.jobId);
   }
 
-  /** 后台：下载视频片段（24 小时内）→ 转存 → 规范化 → 记录实际时长 */
+  /** 后台：下载视频片段（结果过期前）→ 转存 → 规范化 → 记录实际时长 → 清理供应商侧数据 */
   async transfer(clipId: string, ctx: JobContext) {
     const clip = await this.prisma.clip.findUnique({ where: { id: clipId }, include: { job: true } });
     if (!clip || clip.status !== 'TRANSFERRING' || !clip.providerVideoUrl) return;
+    const video = this.providerFor(clip);
+    if (!video) {
+      await this.finishClip(clip, 'FAILED', 'MODEL_UNAVAILABLE', `视频模型 ${clip.modelKey} 已不可用`);
+      return;
+    }
     const tmpRoot = repoPath(getEnv().TMP_DIR);
     await mkdir(tmpRoot, { recursive: true });
     const dir = await mkdtemp(join(tmpRoot, 'clip-'));
+    let saved = false;
     try {
       const raw = join(dir, 'raw.mp4');
       const normalized = join(dir, 'clip.mp4');
-      const data = await httpDownload(clip.providerVideoUrl, 10 * 60_000);
+      const data = await video.downloadResult(clip.providerVideoUrl, clip.providerTaskId ?? '');
       await writeFile(raw, data);
       const base = `users/${clip.job.userId}/clips/${clip.id}`;
       await this.storage.putFile(`${base}/raw.mp4`, raw, 'video/mp4');
@@ -412,6 +447,7 @@ export class GenerationService {
           errorMessage: null,
         },
       });
+      saved = true;
       await this.aggregate(clip.jobId);
     } catch (err) {
       this.logger.warn(`片段 ${clip.id} 转存失败（第 ${ctx.attempt}/${ctx.maxAttempts} 次）：${errorMessage(err)}`);
@@ -419,6 +455,9 @@ export class GenerationService {
       await this.finishClip(clip, 'FAILED', 'TRANSFER_FAILED', `视频已生成，但下载转存失败：${errorMessage(err)}`);
     } finally {
       await rm(dir, { recursive: true, force: true });
+    }
+    if (saved && video.cleanup && clip.providerTaskId) {
+      await video.cleanup(clip.providerTaskId).catch((err) => this.logger.warn(`片段 ${clip.id} 清理供应商数据失败：${errorMessage(err)}`));
     }
   }
 

@@ -24,12 +24,11 @@ import { OutputsService } from './generation/outputs.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsService } from './products/products.service';
 import { ProjectsService } from './projects/projects.service';
-import { SeedreamProvider } from './providers/image/seedream';
+import { realProviderFactory } from './providers/factory';
 import { LlmService } from './providers/llm/llm.service';
 import { OpenAiCompatibleLlm } from './providers/llm/openai-compatible';
-import { selectedImageModel, selectedVideoModel } from './providers/registry';
-import { COMPOSER, IMAGE_PROVIDER, LLM_PROVIDER, VIDEO_PROVIDER } from './providers/types';
-import { SeedanceProvider } from './providers/video/seedance';
+import { ModelHub } from './providers/model-hub';
+import { COMPOSER, LLM_PROVIDER, PROVIDER_FACTORY } from './providers/types';
 import { BullJobQueue } from './queue/bullmq.queue';
 import { InlineJobQueue } from './queue/inline.queue';
 import { JOB_QUEUE } from './queue/job-queue';
@@ -61,31 +60,37 @@ export class AppExceptionFilter implements ExceptionFilter {
   }
 }
 
+/** 大模型供应商可配置（D-47）：DeepSeek 官方、火山方舟托管的 DeepSeek，或任意 OpenAI 兼容接口 */
 function createLlm() {
   const env = getEnv();
-  return env.LLM_PROVIDER === 'ark'
-    ? new OpenAiCompatibleLlm({ provider: 'ark-deepseek', baseUrl: env.ARK_BASE_URL, apiKey: env.ARK_API_KEY, modelId: env.ARK_LLM_MODEL })
-    : new OpenAiCompatibleLlm({ provider: 'deepseek', baseUrl: env.DEEPSEEK_BASE_URL, apiKey: env.DEEPSEEK_API_KEY, modelId: env.DEEPSEEK_MODEL });
-}
-
-/** 按能力登记表中的 provider 选择适配器；新增模型时在这里登记 */
-function createVideoProvider() {
-  const cap = selectedVideoModel();
-  switch (cap.provider) {
-    case 'volcengine-ark':
-      return new SeedanceProvider(cap);
+  switch (env.LLM_PROVIDER) {
+    case 'ark':
+      return new OpenAiCompatibleLlm({
+        provider: 'ark-deepseek',
+        baseUrl: env.ARK_BASE_URL,
+        apiKey: env.ARK_API_KEY,
+        modelId: env.ARK_LLM_MODEL,
+        thinkingParam: 'deepseek',
+        jsonMode: 'json_object',
+      });
+    case 'openai_compatible':
+      return new OpenAiCompatibleLlm({
+        provider: 'llm',
+        baseUrl: env.LLM_BASE_URL,
+        apiKey: env.LLM_API_KEY,
+        modelId: env.LLM_MODEL,
+        thinkingParam: env.LLM_THINKING_PARAM,
+        jsonMode: env.LLM_JSON_MODE,
+      });
     default:
-      throw new Error(`视频模型 ${cap.key} 还没有实现适配器`);
-  }
-}
-
-function createImageProvider() {
-  const cap = selectedImageModel();
-  switch (cap.provider) {
-    case 'volcengine-ark':
-      return new SeedreamProvider(cap);
-    default:
-      throw new Error(`图片模型 ${cap.key} 还没有实现适配器`);
+      return new OpenAiCompatibleLlm({
+        provider: 'deepseek',
+        baseUrl: env.DEEPSEEK_BASE_URL,
+        apiKey: env.DEEPSEEK_API_KEY,
+        modelId: env.DEEPSEEK_MODEL,
+        thinkingParam: 'deepseek',
+        jsonMode: 'json_object',
+      });
   }
 }
 
@@ -103,9 +108,9 @@ function createImageProvider() {
     GenerationService,
     OutputsService,
     LlmService,
+    ModelHub,
     { provide: LLM_PROVIDER, useFactory: createLlm },
-    { provide: VIDEO_PROVIDER, useFactory: createVideoProvider },
-    { provide: IMAGE_PROVIDER, useFactory: createImageProvider },
+    { provide: PROVIDER_FACTORY, useValue: realProviderFactory },
     { provide: COMPOSER, useFactory: () => new RemotionComposer() },
     { provide: JOB_QUEUE, useFactory: () => (getEnv().JOB_QUEUE_MODE === 'inline' ? new InlineJobQueue() : new BullJobQueue()) },
     { provide: APP_GUARD, useClass: AuthGuard },

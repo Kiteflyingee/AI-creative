@@ -5,8 +5,26 @@ export interface HttpJsonOptions {
   method?: 'GET' | 'POST' | 'DELETE';
   url: string;
   apiKey: string;
+  /** 密钥放在哪个请求头：bearer = Authorization: Bearer（默认）；x-goog-api-key = Google Gemini API */
+  auth?: 'bearer' | 'x-goog-api-key';
+  headers?: Record<string, string>;
   body?: unknown;
   timeoutMs: number;
+}
+
+function authHeaders(auth: HttpJsonOptions['auth'], apiKey: string): Record<string, string> {
+  return auth === 'x-goog-api-key' ? { 'x-goog-api-key': apiKey } : { Authorization: `Bearer ${apiKey}` };
+}
+
+interface ErrorBody {
+  error?: { code?: string | number; status?: string; message?: string };
+}
+
+/** 供应商错误码：火山是字符串 code；Google 是数字 code + 字符串 status */
+function errorCode(err: ErrorBody['error'], httpStatus: number): string {
+  if (typeof err?.code === 'string' && err.code) return err.code;
+  if (err?.status) return err.status;
+  return `HTTP_${httpStatus}`;
 }
 
 /** 调用供应商 JSON 接口，把错误统一映射为 ProviderError；不在错误或日志中输出密钥和请求体 */
@@ -19,7 +37,8 @@ export async function httpJson<T>(opts: HttpJsonOptions): Promise<T> {
     res = await fetch(opts.url, {
       method: opts.method ?? 'GET',
       headers: {
-        Authorization: `Bearer ${opts.apiKey}`,
+        ...authHeaders(opts.auth, opts.apiKey),
+        ...(opts.headers ?? {}),
         ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
@@ -42,8 +61,8 @@ export async function httpJson<T>(opts: HttpJsonOptions): Promise<T> {
     json = undefined;
   }
   if (!res.ok) {
-    const errObj = (json as { error?: { code?: string; message?: string } } | undefined)?.error;
-    const code = errObj?.code ?? `HTTP_${res.status}`;
+    const errObj = (json as ErrorBody | undefined)?.error;
+    const code = errorCode(errObj, res.status);
     const message = errObj?.message ?? text.slice(0, 300);
     const retryable = res.status === 429 || res.status >= 500;
     throw new ProviderError(opts.provider, code, `${opts.provider}：${message}`, retryable, res.status);
@@ -51,11 +70,11 @@ export async function httpJson<T>(opts: HttpJsonOptions): Promise<T> {
   return json as T;
 }
 
-/** 下载远端文件（视频、图片结果） */
-export async function httpDownload(url: string, timeoutMs: number): Promise<Buffer> {
+/** 下载远端文件（视频、图片结果）；需要鉴权的地址传 headers */
+export async function httpDownload(url: string, timeoutMs: number, headers?: Record<string, string>): Promise<Buffer> {
   let res: Response;
   try {
-    res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    res = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
     throw new ProviderError('download', 'NETWORK', `下载失败：${(err as Error).message}`, true);
   }
