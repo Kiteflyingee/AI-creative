@@ -59,6 +59,8 @@ const envSchema = z.object({
   VIDEO_TASK_TIMEOUT_MS: z.coerce.number().int().positive().default(30 * 60 * 1000),
   VIRTUAL_PORTRAITS_FILE: z.string().default('config/virtual-portraits.json'),
 
+  /** bullmq = Redis 队列（服务运行）；inline = 进程内执行（命令行脚本） */
+  JOB_QUEUE_MODE: z.enum(['bullmq', 'inline']).default('bullmq'),
   /** 临时文件目录 */
   TMP_DIR: z.string().default('.tmp'),
 });

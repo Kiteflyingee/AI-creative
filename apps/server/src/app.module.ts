@@ -31,6 +31,7 @@ import { selectedImageModel, selectedVideoModel } from './providers/registry';
 import { COMPOSER, IMAGE_PROVIDER, LLM_PROVIDER, VIDEO_PROVIDER } from './providers/types';
 import { SeedanceProvider } from './providers/video/seedance';
 import { BullJobQueue } from './queue/bullmq.queue';
+import { InlineJobQueue } from './queue/inline.queue';
 import { JOB_QUEUE } from './queue/job-queue';
 import { StorageService } from './storage/storage.service';
 
@@ -106,7 +107,7 @@ function createImageProvider() {
     { provide: VIDEO_PROVIDER, useFactory: createVideoProvider },
     { provide: IMAGE_PROVIDER, useFactory: createImageProvider },
     { provide: COMPOSER, useFactory: () => new RemotionComposer() },
-    { provide: JOB_QUEUE, useFactory: () => new BullJobQueue() },
+    { provide: JOB_QUEUE, useFactory: () => (getEnv().JOB_QUEUE_MODE === 'inline' ? new InlineJobQueue() : new BullJobQueue()) },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_FILTER, useClass: AppExceptionFilter },
   ],
