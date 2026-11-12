@@ -22,14 +22,31 @@ test('完整创作流程：素材 → 故事线 → 故事板 → 生成 → 改
   await expect(page.getByTestId('new-project')).toBeVisible();
   await shot(page, 'home');
 
-  // 新建商品
-  await page.getByTestId('new-project').click();
-  await page.getByTestId('new-product-name').locator('input').fill('灰色可拆洗猫窝');
-  await page.getByRole('button', { name: '开始' }).click();
-  await expect(page.getByTestId('product-name').locator('input')).toHaveValue('灰色可拆洗猫窝');
+  // 底部五个入口；广场这一版是占位页
+  await page.getByTestId('tab-plaza').click();
+  await expect(page.getByTestId('plaza-empty')).toBeVisible();
+  await shot(page, 'plaza');
+  await page.getByTestId('tab-home').click();
 
-  // 上传商品图与人物图（人物图会被识别为含真人脸）
+  // 发布：直接进入发布表单，不填商品名称
+  await page.getByTestId('nav-publish').click();
+  await expect(page).toHaveURL(/\/publish$/);
+  await expect(page.getByTestId('publish-name')).toBeVisible();
+  await shot(page, 'publish-form');
+  // 返回主页不会留下空草稿
+  await page.getByRole('button', { name: '返回' }).click();
+  await expect(page.getByTestId('new-project')).toBeVisible();
+  await expect(page.getByText('我的创作')).toHaveCount(0);
+
+  // 选第一张商品图时才创建项目，随后自动素材理解：AI 填好商品名称并给出卖点建议
+  await page.getByTestId('new-project').click();
   await page.getByTestId('upload-PRODUCT').setInputFiles({ name: 'product.jpg', mimeType: 'image/jpeg', buffer: await image('#9aa5b1') });
+  await expect(page).toHaveURL(/\/p\/[^/]+\/product$/);
+  await expect(page.getByTestId('product-name').locator('input')).toHaveValue('灰色可拆洗猫窝');
+  await expect(page.getByText('AI 填写')).toBeVisible();
+  await expect(page.getByTestId('fact-suggested')).toBeVisible();
+
+  // 上传人物图（会被识别为含真人脸）
   await page.getByTestId('upload-CHARACTER').setInputFiles({ name: 'person.jpg', mimeType: 'image/jpeg', buffer: await image('#e0b090') });
   await expect(page.getByText('有真人脸，需要处理')).toBeVisible();
   await page.getByTestId('product-desc').locator('textarea:not([aria-hidden])').fill('猫窝外罩可以拆下来洗，尺寸 50×40 厘米');
@@ -42,8 +59,9 @@ test('完整创作流程：素材 → 故事线 → 故事板 → 生成 → 改
   await page.getByText('AI 按照片风格生成相似人物').click();
   await expect(page.getByText('已换成 AI 相似人物')).toBeVisible();
 
-  // 素材理解 → 确认 AI 建议的卖点
+  // 补充信息后再做一次素材理解 → 确认 AI 建议的卖点
   await page.getByTestId('analyze').click();
+  await expect(page.getByText('素材理解完成，请确认 AI 建议的卖点')).toBeVisible();
   await expect(page.getByTestId('fact-suggested')).toBeVisible();
   await shot(page, 'analysis');
   await page.getByTestId('fact-confirm').click();

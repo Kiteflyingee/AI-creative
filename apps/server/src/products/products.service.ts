@@ -77,15 +77,15 @@ export class ProductsService {
       orderBy: { createdAt: 'asc' },
       take: MAX_ANALYZE_IMAGES,
     });
-    if (!product.name.trim()) throw badRequest('NAME_REQUIRED', '请先填写商品名称，例如“灰色可拆洗猫窝”');
     if (!assets.some((a) => a.kind === 'PRODUCT')) throw badRequest('IMAGE_REQUIRED', '请至少上传一张商品图');
+    const hasName = Boolean(product.name.trim());
 
     const images = await Promise.all(
       assets.map(async (a) => toDataUrl(await toJpeg(await this.storage.getBuffer(a.objectKey!), 1024, 80))),
     );
     const imageList = assets.map((a, i) => `${i + 1}. ${kindName(a)}`).join('\n');
     const user = [
-      `商品名称：${product.name}`,
+      `商品名称：${hasName ? product.name : '（商家未填写，请按图片起一个）'}`,
       `商品描述：${product.description || '（未填写）'}`,
       `目标受众：${product.targetAudience || '（未填写）'}`,
       `商家已写的卖点：\n${product.facts.filter((f) => f.source === 'MERCHANT_CONFIRMED').map((f) => `- ${f.text}`).join('\n') || '（无）'}`,
@@ -97,11 +97,13 @@ export class ProductsService {
       analyzeProductSchema,
     );
 
-    const existing = new Set(product.facts.map((f) => normalize(f.text)));
+    // 只和商家已确认的卖点去重：上一次没处理的 AI 建议会被替换，不能用来去重，否则同样的建议会丢失
+    const kept = product.facts.filter((f) => f.source === 'MERCHANT_CONFIRMED');
+    const existing = new Set(kept.map((f) => normalize(f.text)));
     await this.prisma.$transaction(async (tx) => {
       // 上一次的 AI 建议若商家没处理，替换为新的建议
       await tx.productFact.deleteMany({ where: { productId: product.id, source: 'AI_SUGGESTED' } });
-      let position = product.facts.length;
+      let position = kept.length;
       for (const point of result.sellingPoints) {
         const key = normalize(point.text);
         if (!key || existing.has(key)) continue;
@@ -123,14 +125,23 @@ export class ProductsService {
           },
         });
       }
+      // 商品名称选填（D-54）：商家没填时用 AI 起的名称，商家已填的名称不改
+      const aiName = hasName ? '' : result.productName;
       await tx.product.update({
         where: { id: product.id },
         data: {
+          ...(aiName ? { name: aiName } : {}),
           category: result.category || product.category,
-          analysis: { missingInfo: result.missingInfo, suggestions: result.suggestions, promptVersion: PROMPT_VERSION },
+          analysis: {
+            productName: aiName,
+            missingInfo: result.missingInfo,
+            suggestions: result.suggestions,
+            promptVersion: PROMPT_VERSION,
+          },
           analyzedAt: new Date(),
         },
       });
+      if (aiName) await tx.project.update({ where: { id: project.id }, data: { title: aiName } });
     });
     return { ok: true };
   }

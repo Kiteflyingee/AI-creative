@@ -50,6 +50,26 @@ export function IconHome(props: IconProps) {
   );
 }
 
+/** 广场 */
+export function IconCompass(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="8.2" />
+      <path d="m15.2 8.8-1.9 4.5-4.5 1.9 1.9-4.5 4.5-1.9Z" />
+    </Svg>
+  );
+}
+
+/** 我的 */
+export function IconUser(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="8.6" r="3.6" />
+      <path d="M5 19.6c1.2-3.2 3.8-5 7-5s5.8 1.8 7 5" />
+    </Svg>
+  );
+}
+
 export function IconFilm(props: IconProps) {
   return (
     <Svg {...props}>

@@ -1,8 +1,8 @@
 import { ActionSheet, Dialog, Input, TextArea, Toast } from 'antd-mobile';
-import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, showError } from '../api';
-import { AssetImage, BottomBar, ChatBox, FlowPage, Loading, PageHeader, Section, UploadButton } from '../components';
+import { AssetImage, BottomBar, ChatBox, FlowPage, Loading, PageHeader, Section, UploadButton, uploadFiles, UploadHero } from '../components';
 import { useProject, useRefreshProject } from '../hooks';
 import type { AssetKind, AssetView, FactView, ProjectView } from '../types';
 import { IconClose, IconEdit, IconSparkle, IconTrash } from '../ui/icons';
@@ -171,6 +171,7 @@ function AssetGrid({
 export function ProductPage() {
   const { projectId = '' } = useParams();
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
   const { data: view, isLoading } = useProject(projectId);
   const refresh = useRefreshProject(projectId);
   const [form, setForm] = useState({ name: '', description: '', targetAudience: '' });
@@ -178,10 +179,22 @@ export function ProductPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [next, setNext] = useState(false);
+  const [heroBusy, setHeroBusy] = useState(false);
+  const autoAnalyzed = useRef(false);
 
   useEffect(() => {
     if (view) setForm({ name: view.product.name, description: view.product.description, targetAudience: view.product.targetAudience });
   }, [view?.product.name, view?.product.description, view?.product.targetAudience]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 从发布表单进来（?analyze=1）：自动做一次素材理解，填好商品名称和卖点建议
+  const wantAuto = params.get('analyze') === '1';
+  const canAuto = Boolean(view && !view.product.analyzedAt && view.assets.some((a) => a.kind === 'PRODUCT' && a.origin === 'UPLOAD'));
+  useEffect(() => {
+    if (!wantAuto || !view || autoAnalyzed.current) return;
+    autoAnalyzed.current = true;
+    setParams({}, { replace: true });
+    if (canAuto) void analyze();
+  }, [wantAuto, view, canAuto]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading || !view) return <Loading />;
   const uploads = (kind: AssetKind) => view.assets.filter((a) => a.kind === kind && a.origin === 'UPLOAD');
@@ -250,13 +263,39 @@ export function ProductPage() {
   const suggested = view.product.facts.filter((f) => f.source === 'AI_SUGGESTED');
   const confirmed = view.product.facts.filter((f) => f.source === 'MERCHANT_CONFIRMED');
   const onChanged = () => void refresh();
+  const productImages = uploads('PRODUCT');
+  const aiName = view.product.analysis?.productName;
+  const nameTag = !form.name.trim() ? (
+    <Pill className="on-bg">选填</Pill>
+  ) : aiName && form.name === aiName ? (
+    <Pill tone="ink">
+      <IconSparkle size={10} />
+      AI 填写
+    </Pill>
+  ) : null;
+  const nameMissing = !form.name.trim();
+
+  const uploadFirst = async (files: File[]) => {
+    setHeroBusy(true);
+    const done = await uploadFiles(projectId, 'PRODUCT', files);
+    setHeroBusy(false);
+    await refresh();
+    if (done.length && !view.product.analyzedAt) await analyze();
+  };
 
   return (
     <FlowPage bar>
-      <PageHeader title="商品素材" step={0} />
+      <PageHeader title={view.product.name || '新商品'} step={0} back="/" />
 
-      <Section title="商品图" desc="纯色干净背景、无多余文字、商品占画面一半以上；多拍几个角度（正面、侧面、细节、包装内部）">
-        <AssetGrid projectId={projectId} kind="PRODUCT" addText="上传商品图" assets={uploads('PRODUCT')} view={view} onChanged={onChanged} />
+      <Section
+        title="商品图"
+        desc={productImages.length ? '纯色干净背景、无多余文字、商品占画面一半以上；多拍几个角度（正面、侧面、细节、包装内部）' : undefined}
+      >
+        {productImages.length ? (
+          <AssetGrid projectId={projectId} kind="PRODUCT" addText="继续添加" assets={productImages} view={view} onChanged={onChanged} />
+        ) : (
+          <UploadHero busy={heroBusy} onFiles={(files) => void uploadFirst(files)} testId="upload-PRODUCT" />
+        )}
       </Section>
 
       <Section
@@ -269,8 +308,23 @@ export function ProductPage() {
           ) : undefined
         }
       >
-        <Field label="商品名称" hint="包含品类和核心特征，例如“灰色可拆洗猫窝”">
-          <Input className="ui-input" value={form.name} onChange={(v) => setForm({ ...form, name: v })} maxLength={60} data-testid="product-name" />
+        <Field
+          label={
+            <span className="ui-field__label-row">
+              商品名称
+              {nameTag}
+            </span>
+          }
+          hint={nameMissing ? '不填也可以，AI 素材理解时会帮你填写' : '包含品类和核心特征，例如“灰色可拆洗猫窝”'}
+        >
+          <Input
+            className="ui-input"
+            placeholder="例如：灰色可拆洗猫窝"
+            value={form.name}
+            onChange={(v) => setForm({ ...form, name: v })}
+            maxLength={60}
+            data-testid="product-name"
+          />
         </Field>
         <Field label="商品描述" hint="使用场景、具体参数、体感，例如“适合夏天的网面跑鞋，重量 180g”">
           <TextArea
@@ -356,12 +410,22 @@ export function ProductPage() {
           block
           size="lg"
           variant="primary"
-          loading={next}
-          disabled={confirmed.length === 0 || uploads('PRODUCT').length === 0}
+          loading={next || analyzing}
+          disabled={productImages.length === 0 || confirmed.length === 0 || nameMissing}
           onClick={() => void goNext()}
           data-testid="to-storylines"
         >
-          {confirmed.length === 0 ? '请先确认至少一条卖点' : view.storylines.length ? '查看故事线' : '下一步：生成 4 条故事线'}
+          {productImages.length === 0
+            ? '先添加商品图'
+            : analyzing
+              ? 'AI 正在理解商品'
+              : confirmed.length === 0
+                ? '请先确认至少一条卖点'
+                : nameMissing
+                  ? '请先填写商品名称'
+                  : view.storylines.length
+                    ? '查看故事线'
+                    : '下一步：生成 4 条故事线'}
         </Btn>
       </BottomBar>
     </FlowPage>

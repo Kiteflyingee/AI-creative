@@ -92,6 +92,7 @@ function defaultLlm(req: LlmRequest): unknown {
       return { hasHumanFace: false, quality: 'good', issues: [], viewRole: '正面', description: '白底商品图' };
     case 'analyze_product':
       return {
+        productName: '灰色可拆洗猫窝',
         category: '宠物用品',
         sellingPoints: [{ text: '外罩可拆洗', basis: '商家描述' }],
         images: [{ index: 1, viewRole: '正面', quality: 'good', issues: [], hasHumanFace: false, description: '灰色猫窝正面' }],

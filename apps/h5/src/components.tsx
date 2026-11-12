@@ -94,6 +94,55 @@ export function EmptyHint({ text, children }: { text: string; children?: ReactNo
   );
 }
 
+/** 逐张上传；失败的图片用轻提示说明服务端给出的原因（如尺寸不符合要求），返回上传成功的图片 */
+export async function uploadFiles(projectId: string, kind: AssetKind, files: File[]): Promise<AssetView[]> {
+  const done: AssetView[] = [];
+  for (const file of files) {
+    const form = new FormData();
+    form.append('kind', kind);
+    form.append('file', file);
+    try {
+      done.push(await api.upload<AssetView>(`/app/v1/projects/${projectId}/assets`, form));
+    } catch (err) {
+      Toast.show({ content: `${file.name}：${(err as Error).message}`, duration: 4000 });
+    }
+  }
+  return done;
+}
+
+/** 还没有商品图时的大上传区（发布表单第一块）。只负责选图，上传由调用方处理 */
+export function UploadHero({ busy, onFiles, testId }: { busy: boolean; onFiles: (files: File[]) => void; testId: string }) {
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <input
+        ref={input}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        multiple
+        hidden
+        data-testid={testId}
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          e.target.value = '';
+          if (files.length) onFiles(files);
+        }}
+      />
+      <button type="button" className="ui-upload-hero" disabled={busy} onClick={() => input.current?.click()}>
+        <span className="ui-upload-hero__plus">{busy ? <span className="ui-spinner" aria-hidden="true" /> : <IconPlus size={24} />}</span>
+        <span className="ui-upload-hero__title">{busy ? '上传中' : '添加商品图'}</span>
+        <span className="ui-upload-hero__sub">纯色背景、商品占画面一半以上，可以一次选多张</span>
+        <span className="ui-upload-hero__angles" aria-hidden="true">
+          <span>正面</span>
+          <span>侧面</span>
+          <span>细节</span>
+          <span>包装</span>
+        </span>
+      </button>
+    </>
+  );
+}
+
 /** 选择本地图片并上传；失败时显示服务端给出的原因（如尺寸不符合要求）。tile 为图片网格里的“添加”块 */
 export function UploadButton({
   projectId,
@@ -117,17 +166,7 @@ export function UploadButton({
   const upload = async (files: FileList | null) => {
     if (!files?.length) return;
     setBusy(true);
-    const done: AssetView[] = [];
-    for (const file of Array.from(files)) {
-      const form = new FormData();
-      form.append('kind', kind);
-      form.append('file', file);
-      try {
-        done.push(await api.upload<AssetView>(`/app/v1/projects/${projectId}/assets`, form));
-      } catch (err) {
-        Toast.show({ content: `${file.name}：${(err as Error).message}`, duration: 4000 });
-      }
-    }
+    const done = await uploadFiles(projectId, kind, Array.from(files));
     setBusy(false);
     if (input.current) input.current.value = '';
     if (done.length) onUploaded(done);

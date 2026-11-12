@@ -6,7 +6,7 @@ import { z } from 'zod';
  * 卖点要具体可拍、口播短、每镜一个主要动作、先用参考图锁定主体。
  * 修改提示词时同步提升 PROMPT_VERSION，便于对比效果。
  */
-export const PROMPT_VERSION = 'v0.3.0';
+export const PROMPT_VERSION = 'v0.3.1';
 
 const s = (max: number) => z.string().transform((v) => v.trim().slice(0, max));
 
@@ -31,6 +31,8 @@ export const INSPECT_IMAGE_SYSTEM = `你是电商短视频的素材检查助手�
 
 // ---------- 素材理解 ----------
 export const analyzeProductSchema = z.object({
+  /** 商家没填商品名称时，按图片和描述起的名称 */
+  productName: s(30).default(''),
   category: s(30).default(''),
   sellingPoints: z.array(z.object({ text: s(60), basis: s(20).default('') })).max(10).default([]),
   images: z
@@ -52,8 +54,9 @@ export const analyzeProductSchema = z.object({
 export type AnalyzeProductResult = z.infer<typeof analyzeProductSchema>;
 
 export const ANALYZE_PRODUCT_SYSTEM = `你是电商短视频的“素材理解”助手：看懂商品，提炼可以拍成画面的卖点，诊断图片质量并给出补充建议。只输出 JSON：
-{"category": string, "sellingPoints": [{"text": string, "basis": string}], "images": [{"index": number, "viewRole": string, "quality": "good"|"fair"|"poor", "issues": string[], "hasHumanFace": boolean, "description": string}], "missingInfo": string[], "suggestions": string[]}
+{"productName": string, "category": string, "sellingPoints": [{"text": string, "basis": string}], "images": [{"index": number, "viewRole": string, "quality": "good"|"fair"|"poor", "issues": string[], "hasHumanFace": boolean, "description": string}], "missingInfo": string[], "suggestions": string[]}
 规则：
+0. productName：商家已填商品名称时原样返回；没填时按图片和描述起一个 6–16 字的名称，格式“外观或核心特征 + 品类”，例如“灰色可拆洗猫窝”“白色网面跑鞋”。品牌、型号、功效只有在图片中清楚可见或商家写明时才能写。
 1. 卖点必须具体、能拍出来：优先“功能特性 + 量化数据 + 场景/体感”，例如“鞋底加厚 2cm，久站不累”“一鞋两穿：踩跟出街，立跟通勤”；不要“好穿、好看、性价比高”这类空泛词。
 2. 只能依据商家提供的文字或图片中直接可见的内容；basis 填“商家描述”或“图片可见”。不得编造材质、功效、认证、价格、产地、销量。商家没写的数据不要补数字。
 3. 卖点 3–6 条，按对视频最有说服力的顺序排列；与商家已有卖点重复的不要再写。

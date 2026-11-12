@@ -12,6 +12,7 @@ import { HomePage } from './pages/HomePage';
 import { JobPage } from './pages/JobPage';
 import { LoginPage } from './pages/LoginPage';
 import { ProductPage } from './pages/ProductPage';
+import { PublishPage } from './pages/PublishPage';
 import { SharePage } from './pages/SharePage';
 import { StoryboardPage } from './pages/StoryboardPage';
 import { StorylinesPage } from './pages/StorylinesPage';
@@ -47,6 +48,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/login" element={<LoginPage />} />
             <Route path="/s/:token" element={<SharePage />} />
             <Route path="/" element={authed(<HomePage />)} />
+            <Route path="/publish" element={authed(<PublishPage />)} />
             <Route path="/p/:projectId/product" element={authed(<ProductPage />)} />
             <Route path="/p/:projectId/storylines" element={authed(<StorylinesPage />)} />
             <Route path="/p/:projectId/storyboard" element={authed(<StoryboardPage />)} />

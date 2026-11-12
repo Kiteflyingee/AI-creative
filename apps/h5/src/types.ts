@@ -80,7 +80,8 @@ export interface ProjectView {
     description: string;
     targetAudience: string;
     category: string;
-    analysis: { missingInfo: string[]; suggestions: string[] } | null;
+    /** productName：商家没填名称时 AI 起的名称（商家已填时为空） */
+    analysis: { productName?: string; missingInfo: string[]; suggestions: string[] } | null;
     analyzedAt: string | null;
     facts: FactView[];
   };

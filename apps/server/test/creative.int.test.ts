@@ -65,6 +65,39 @@ describe('素材、故事线、故事板与对话修改', () => {
     expect(lines.body[0].content.sellingPointIds).toEqual([v.product.facts[0].id]);
   });
 
+  it('商品名称选填：没填时素材理解按图起名并更新项目标题；商家已填的名称不改', async () => {
+    const created = await ctx.http().post('/app/v1/projects').set(auth(token)).send({}).expect(201);
+    const projectId = created.body.projectId as string;
+    await uploadImage(ctx, token, projectId, 'PRODUCT');
+    await ctx.http().post(`/app/v1/projects/${projectId}/analyze`).set(auth(token)).expect(201);
+    expect(ctx.llm.calls.find((c) => c.purpose === 'analyze_product')!.user).toContain('商家未填写，请按图片起一个');
+    const v = await view(projectId);
+    expect(v.product.name).toBe('灰色可拆洗猫窝');
+    expect(v.project.title).toBe('灰色可拆洗猫窝');
+    expect(v.product.analysis.productName).toBe('灰色可拆洗猫窝');
+
+    const named = await newProject();
+    await uploadImage(ctx, token, named, 'PRODUCT');
+    await ctx.http().post(`/app/v1/projects/${named}/analyze`).set(auth(token)).expect(201);
+    const w = await view(named);
+    expect(w.product.name).toBe('灰色猫窝');
+    expect(w.product.analysis.productName).toBe('');
+  });
+
+  it('再次素材理解时，和上次相同但还没处理的 AI 建议不会丢失；已确认的卖点不重复建议', async () => {
+    const projectId = await newProject();
+    await uploadImage(ctx, token, projectId, 'PRODUCT');
+    await ctx.http().post(`/app/v1/projects/${projectId}/analyze`).set(auth(token)).expect(201);
+    await ctx.http().post(`/app/v1/projects/${projectId}/analyze`).set(auth(token)).expect(201);
+    let v = await view(projectId);
+    expect(v.product.facts).toEqual([expect.objectContaining({ text: '外罩可拆洗', source: 'AI_SUGGESTED' })]);
+
+    await ctx.http().patch(`/app/v1/facts/${v.product.facts[0].id}`).set(auth(token)).send({ confirm: true }).expect(200);
+    await ctx.http().post(`/app/v1/projects/${projectId}/analyze`).set(auth(token)).expect(201);
+    v = await view(projectId);
+    expect(v.product.facts).toEqual([expect.objectContaining({ text: '外罩可拆洗', source: 'MERCHANT_CONFIRMED' })]);
+  });
+
   it('故事线引用不存在的卖点时带着错误说明重试', async () => {
     const projectId = await newProject();
     await uploadImage(ctx, token, projectId, 'PRODUCT');

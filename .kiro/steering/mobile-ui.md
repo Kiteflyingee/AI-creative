@@ -18,7 +18,7 @@ inclusion: always
 | `src/ui/icons.tsx` | 全部图标 |
 | `src/components.tsx` | `PageHeader`（返回 + 标题 + 五步进度）、`FlowPage`、`Section`、`BottomBar`、`Loading`、`AiBadge`、`EmptyHint`、`UploadButton`、`AssetImage`、`ChatBox` |
 
-**迁移状态（2026-11-12）**：全部 9 个页面（首页、登录、分享，以及商品、故事线、故事板、确认、进度、作品 6 个流程页）已按本规范实现。页面里只使用 §5.2 白名单内的 antd-mobile 组件；`styles.css` 只剩全局基础样式，旧类名（`.section`、`.shot-card`、`.fact`、`.asset-*`、`.storyline-card` 等）已删除。迁移后端到端测试通过，截图见 `apps/h5/e2e/screenshots/`（iPhone 13 尺寸）；§8 要求的其他 3 个尺寸还没有逐页截图验收。
+**迁移状态（2026-11-12）**：全部 10 个页面（首页、登录、分享、发布表单，以及商品、故事线、故事板、确认、进度、作品 6 个流程页）已按本规范实现。首页是五格导航（主页、广场、发布、作品、我的），广场目前是占位页。页面里只使用 §5.2 白名单内的 antd-mobile 组件；`styles.css` 只剩全局基础样式，旧类名（`.section`、`.shot-card`、`.fact`、`.asset-*`、`.storyline-card` 等）已删除。迁移后端到端测试通过，截图见 `apps/h5/e2e/screenshots/`（iPhone 13 尺寸）；§8 要求的其他 3 个尺寸还没有逐页截图验收。
 
 **仍需注意的问题**：
 
@@ -40,7 +40,7 @@ inclusion: always
 - 底部是悬浮的黑色胶囊导航，选中格反白，中间是更大的星形。
 - 全屏主按钮是黑底白字，圆角约为高度的三分之一。
 
-本项目与参考的差异是有意的：导航只有 3 格（不是 5 格）；作品画面是 9:16；头像用昵称首字，不用照片；轮播两侧的卡片只缩小、不倾斜，倾斜只用于登录页的扇形插图。
+本项目与参考的差异是有意的：导航五格都带文字标签（参考图只有图标）；作品画面是 9:16；头像用昵称首字，不用照片；轮播两侧的卡片只缩小、不倾斜，倾斜只用于登录页的扇形插图。
 
 ## 1. 产品 UI 设计目标
 
@@ -146,9 +146,9 @@ inclusion: always
 
 只有三种页面骨架，新页面必须选其中一种：
 
-**A. 一级页（首页的创作 / 作品 / 我的）**：`ui-page ui-page--dock`
+**A. 一级页（首页的主页 / 广场 / 作品 / 我的）**：`ui-page ui-page--dock`
 
-1. `ui-topbar`：高 56，左边品牌星形（30），右边头像按钮。
+1. `ui-topbar`：高 56，只有左边的品牌星形（30）。
 2. 问候：`ui-display` 加一行 `ui-lead`，上方间距 12。
 3. 主入口：`ui-create-bar`，上方间距 20。
 4. 内容区块：`ui-section-head`（左边标题，右边 `ui-link`“全部”），下面是大卡轮播、列表或网格。
@@ -177,8 +177,13 @@ inclusion: always
 
 ### 5.1 导航
 
-- **底部导航 `ui-dock`**：只在一级页显示。黑色胶囊，高 68，内边距 6，圆角 26，距底 12 + 安全区。共三格：创作（家形图标）、新建（中间，星形 28，透明底）、作品（胶片图标），每格宽 62、圆角 20；选中格白底黑色图标，未选中格 8% 白底、72% 白色图标。不显示文字标签，每格必须有 `aria-label`，当前格加 `aria-current="page"`。
-- **“我的”**从顶栏头像进入（`?tab=me`），进入后头像按钮变黑。
+- **底部导航 `ui-dock`**：只在一级页显示。黑色胶囊，高 68，内边距 6，圆角 26，距底 12 + 安全区；宽度 = 屏幕宽 − 2 × 16（最大 528），五格等分，格间距 4。
+  - 五格依次是：主页（`IconHome`）、广场（`IconCompass`）、发布（`IconSparkle` 26，实心）、作品（`IconFilm`）、我的（`IconUser`）。其余图标 22。
+  - 每格是图标加文字：图标放在高 26 的 `ui-dock__icon` 里，下方 11/13 的文字标签，字重 500。
+  - 选中格白底黑字，圆角 20；未选中格透明底、`--ui-on-media-2` 的白色。
+  - “发布”是动作不是页签：永远不显示选中态，文字为纯白；点了直接进入发布表单 `/publish`。
+  - 当前页签加 `aria-current="page"`。320 宽时每格 52×56，仍满足 44 的点击区。
+- **页签地址**：主页是 `/`，其余用 `?tab=plaza|works|me`。
 - **流程页顶栏**：不用 antd `NavBar`；返回按钮用 `IconButton` + `IconBack`（22），右侧最多一个 `extra` 图标按钮。
 
 ### 5.2 组件选用（先复用，再新增）
@@ -198,6 +203,8 @@ inclusion: always
 | 空状态 | `EmptyHint`（浅灰大圆角 + 一句说明 + 最多一个按钮） | antd `Empty`、插画 |
 | 加载 | 首次进入流程页用 `Loading`；列表和卡片用骨架 `ui-skel`；按钮用 `Btn loading` | 整页遮罩转圈 |
 | 图片 | `ui-tiles` / `ui-tile`（3 列）、`ui-hrail` + `ui-ref`（横滑 9:16）、`AssetImage` | `.asset-*` 旧类 |
+| 还没有图时的上传 | `UploadHero`（`ui-upload-hero`：黑色圆形加号 56、标题、说明、角度提示胶囊）；有图后换成 `ui-tiles` + `UploadButton variant="tile"`；批量上传用 `uploadFiles` | 空白的图片网格 |
+| 表单项标题旁的标签 | `ui-field__label-row` + `Pill`（“选填”用 `on-bg`，“AI 填写”用 `ink` 加 10 号星形） | 在标题后面写括号说明 |
 | 分组信息 | `ui-list` + `ui-list__row` 或 `ui-group` | 表格、灰色分组标题栏 |
 | 业务卡片 | 卖点 `ui-fact`，故事线 `ui-story`，镜头 `ui-shot`，版本 `ui-versions` / `ui-version`，播放器 `ui-player` | `styles.css` 中对应的旧类 |
 
@@ -215,7 +222,7 @@ antd-mobile 只允许在页面里使用：`Input`、`TextArea`、`Dialog`、`Pop
 ## 6. 图标、插画、图片使用规范
 
 - **图标**：只能用 `src/ui/icons.tsx` 里的图标。规格：24×24 视图，描边 1.6（加号、关闭、对勾 2–2.2），圆角端点，颜色跟随 `currentColor`。品牌星形和播放按钮是实心。不混用 antd-mobile-icons、emoji 或其他图标库。需要新图标时，按同样规格画好加到 icons.tsx。
-- **图标尺寸**：顶栏和导航 22；品牌 30；导航中间的星形 28；按钮内和小图标按钮 18；勾选 14；AI 标识里的星形 10。
+- **图标尺寸**：顶栏和导航 22；品牌 30；导航中间的星形 26；按钮内和小图标按钮 18；勾选 14；AI 标识里的星形 10。
 - **插画**：不用插画和装饰图片。流程示意只用 `ui-art`（灰色、黑色几何块）；登录页只用 `ui-fan` 扇形卡。
 - **图片比例**：
 
@@ -271,7 +278,7 @@ antd-mobile 只允许在页面里使用：`Input`、`TextArea`、`Dialog`、`Pop
 7. 插画、emoji、库存图片、示例作品；其他图标库。
 8. 成片画面上出现非毛玻璃的实色块（AI 标识除外），或封面上缺少“AI生成”。
 9. 卡片里再嵌套卡片超过两层；弹层里再开弹层。
-10. 改动或删除 e2e 依赖的 `data-testid`；首页除新建对话框外的按钮文案含“开始”（e2e 按按钮名“开始”定位）。
+10. 改动或删除 e2e 依赖的 `data-testid`（导航用 `tab-home / tab-plaza / nav-publish / tab-works / tab-me`，入口条 `new-project`，上传区 `upload-PRODUCT`）。
 11. 只看代码、类型检查或测试通过就认为 UI 完成（见 §10）。
 
 ## 10. 视觉验收标准

@@ -446,16 +446,6 @@
   color: var(--ui-ink);
 }
 
-.ui-avatar {
-  font-size: 17px;
-  font-weight: 500;
-}
-
-.ui-avatar.is-active {
-  background: var(--ui-ink);
-  color: var(--ui-on-media);
-}
-
 /* ---------- 顶栏（流程页） ---------- */
 
 .ui-header {
@@ -1130,6 +1120,78 @@
 
 .ui-tile--add:disabled .ui-tile__plus {
   opacity: 0.5;
+}
+
+/* 还没有商品图时的大上传区（发布表单第一块） */
+.ui-upload-hero {
+  width: 100%;
+  padding: var(--ui-s7) var(--ui-s5) 18px;
+  border-radius: var(--ui-r-lg);
+  background: var(--ui-fill);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  transition: transform var(--ui-dur) var(--ui-ease);
+}
+
+.ui-upload-hero:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.ui-upload-hero:disabled {
+  cursor: default;
+}
+
+.ui-upload-hero__plus {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--ui-ink);
+  color: var(--ui-on-media);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ui-upload-hero__title {
+  margin-top: 14px;
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 500;
+}
+
+.ui-upload-hero__sub {
+  margin-top: var(--ui-s1);
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--ui-text-2);
+}
+
+.ui-upload-hero__angles {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--ui-s2);
+}
+
+.ui-upload-hero__angles span {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--ui-r-pill);
+  background: var(--ui-surface);
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--ui-text-2);
+}
+
+/* 表单项标题旁的小标签（选填、AI 填写） */
+.ui-field__label-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* 横向滚动的图片行（参考图、镜头版本） */
@@ -1831,13 +1893,6 @@
   cursor: default;
 }
 
-.ui-dialog-hint {
-  margin: 10px 0 0;
-  font-size: 13px;
-  line-height: 18px;
-  color: var(--ui-text-2);
-}
-
 /* ---------- 分区标题（首页） ---------- */
 
 .ui-section {
@@ -2518,34 +2573,50 @@
   z-index: 29;
 }
 
+/* 五格：主页、广场、发布、作品、我的；左右各留页面边距，宽度随屏幕 */
 .ui-dock {
   position: fixed;
   left: 50%;
   bottom: calc(var(--ui-dock-gap) + var(--ui-safe-bottom));
   transform: translateX(-50%);
   z-index: 30;
+  width: min(calc(100% - 2 * var(--ui-gutter)), calc(560px - 2 * var(--ui-gutter)));
   height: var(--ui-dock-h);
   padding: 6px;
-  display: flex;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--ui-s1);
   border-radius: 26px;
   background: var(--ui-ink);
   box-shadow: 0 10px 30px rgba(14, 14, 16, 0.18);
 }
 
 .ui-dock__item {
-  width: 62px;
   height: 100%;
+  min-width: 0;
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.72);
+  background: transparent;
+  color: var(--ui-on-media-2);
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 3px;
+  font-size: 11px;
+  line-height: 13px;
+  font-weight: 500;
   transition:
     background var(--ui-dur) var(--ui-ease),
     color var(--ui-dur) var(--ui-ease),
     transform var(--ui-dur) var(--ui-ease);
+}
+
+/* 图标放在同样高的框里，大小不同的图标下方文字也对齐 */
+.ui-dock__icon {
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .ui-dock__item.is-active {
@@ -2553,9 +2624,8 @@
   color: var(--ui-ink);
 }
 
-/* 中间的新建入口：不加底色，星形更大 */
-.ui-dock__item--create {
-  background: transparent;
+/* 中间的“发布”是动作不是页签：不加底色，星形更大 */
+.ui-dock__item--publish {
   color: var(--ui-on-media);
 }
 

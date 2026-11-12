@@ -1,10 +1,19 @@
 import { useQuery } from '@tanstack/react-query';
-import { Dialog, Input, SpinLoading } from 'antd-mobile';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, clearSession, getUser, showError } from '../api';
 import type { JobStatus, ProjectView } from '../types';
-import { IconChevronRight, IconFilm, IconHome, IconPackage, IconPlay, IconPlus, IconSparkle } from '../ui/icons';
+import {
+  IconChevronRight,
+  IconCompass,
+  IconFilm,
+  IconHome,
+  IconPackage,
+  IconPlay,
+  IconPlus,
+  IconSparkle,
+  IconUser,
+} from '../ui/icons';
 
 interface ProjectItem {
   id: string;
@@ -15,7 +24,8 @@ interface ProjectItem {
   hasOutput: boolean;
 }
 
-type Tab = 'create' | 'works' | 'me';
+type Tab = 'home' | 'plaza' | 'works' | 'me';
+const TABS: Tab[] = ['home', 'plaza', 'works', 'me'];
 type Stage = 'draft' | 'running' | 'done' | 'failed';
 type Filter = 'all' | Stage;
 
@@ -96,40 +106,47 @@ export async function openProject(navigate: (to: string) => void, projectId: str
   }
 }
 
+/** 底部导航的一格；“发布”是动作，其余是页签 */
+function DockItem({
+  label,
+  icon,
+  active = false,
+  publish = false,
+  onClick,
+  testId,
+}: {
+  label: string;
+  icon: ReactNode;
+  active?: boolean;
+  publish?: boolean;
+  onClick: () => void;
+  testId?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={`ui-dock__item${publish ? ' ui-dock__item--publish' : ''}${active ? ' is-active' : ''}`}
+      aria-current={active ? 'page' : undefined}
+      onClick={onClick}
+      data-testid={testId}
+    >
+      <span className="ui-dock__icon">{icon}</span>
+      {label}
+    </button>
+  );
+}
+
 export function HomePage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const rawTab = params.get('tab');
-  const tab: Tab = rawTab === 'works' || rawTab === 'me' ? rawTab : 'create';
-  const setTab = (key: Tab) => setParams({ tab: key });
+  const rawTab = params.get('tab') as Tab | null;
+  const tab: Tab = rawTab && TABS.includes(rawTab) ? rawTab : 'home';
+  const setTab = (key: Tab) => setParams(key === 'home' ? {} : { tab: key });
   const user = getUser();
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.get<ProjectItem[]>('/app/v1/projects') });
-  const [creating, setCreating] = useState(false);
 
-  const create = async () => {
-    if (creating) return;
-    let name = '';
-    const ok = await Dialog.confirm({
-      title: '新建商品视频',
-      content: (
-        <div>
-          <Input placeholder="商品名称，如：灰色可拆洗猫窝" onChange={(v) => (name = v)} data-testid="new-product-name" />
-          <p className="ui-dialog-hint">下一步上传商品图，AI 会先帮你理解商品和卖点</p>
-        </div>
-      ),
-      confirmText: '开始',
-    });
-    if (!ok) return;
-    setCreating(true);
-    try {
-      const res = await api.post<{ projectId: string }>('/app/v1/projects', { name: name.trim() });
-      navigate(`/p/${res.projectId}/product`);
-    } catch (err) {
-      showError(err);
-    } finally {
-      setCreating(false);
-    }
-  };
+  // 发布：直接进入发布表单，不再先填商品名称（D-54）
+  const publish = () => navigate('/publish');
 
   const list = projects.data ?? [];
   const works = list.filter((p) => p.hasOutput);
@@ -140,37 +157,25 @@ export function HomePage() {
         <div className="ui-brand" aria-label="AI 带货视频">
           <IconSparkle size={30} />
         </div>
-        <button
-          type="button"
-          className={`ui-icon-btn ui-avatar ui-pressable${tab === 'me' ? ' is-active' : ''}`}
-          aria-label="我的"
-          onClick={() => setTab('me')}
-        >
-          {initialOf(user?.name, '我')}
-        </button>
       </header>
 
-      {tab === 'create' && (
+      {tab === 'home' && (
         <CreateTab
           userName={user?.name}
           query={projects}
           list={list}
           works={works}
-          creating={creating}
-          onCreate={() => void create()}
+          onCreate={publish}
           onOpen={(id) => void openProject(navigate, id)}
           onOpenWork={(id) => navigate(`/p/${id}/work`)}
           onSeeAllWorks={() => setTab('works')}
         />
       )}
 
+      {tab === 'plaza' && <PlazaTab onPublish={publish} />}
+
       {tab === 'works' && (
-        <WorksTab
-          loading={projects.isLoading}
-          works={works}
-          onOpenWork={(id) => navigate(`/p/${id}/work`)}
-          onCreate={() => void create()}
-        />
+        <WorksTab loading={projects.isLoading} works={works} onOpenWork={(id) => navigate(`/p/${id}/work`)} onCreate={publish} />
       )}
 
       {tab === 'me' && (
@@ -188,35 +193,31 @@ export function HomePage() {
       {/* 内容滚到导航下方时逐渐淡出，不被导航硬生生压住 */}
       <div className="ui-dock-scrim" aria-hidden="true" />
       <nav className="ui-dock" aria-label="主导航">
-        <button
-          type="button"
-          className={`ui-dock__item${tab === 'create' ? ' is-active' : ''}`}
-          aria-label="创作"
-          aria-current={tab === 'create' ? 'page' : undefined}
-          onClick={() => setTab('create')}
-        >
-          <IconHome size={24} />
-        </button>
-        <button
-          type="button"
-          className="ui-dock__item ui-dock__item--create"
-          aria-label="新建商品视频"
-          data-testid="nav-create"
-          disabled={creating}
-          onClick={() => void create()}
-        >
-          <IconSparkle size={30} />
-        </button>
-        <button
-          type="button"
-          className={`ui-dock__item${tab === 'works' ? ' is-active' : ''}`}
-          aria-label="作品"
-          aria-current={tab === 'works' ? 'page' : undefined}
-          onClick={() => setTab('works')}
-        >
-          <IconFilm size={24} />
-        </button>
+        <DockItem label="主页" icon={<IconHome size={22} />} active={tab === 'home'} onClick={() => setTab('home')} testId="tab-home" />
+        <DockItem label="广场" icon={<IconCompass size={22} />} active={tab === 'plaza'} onClick={() => setTab('plaza')} testId="tab-plaza" />
+        <DockItem label="发布" icon={<IconSparkle size={26} />} publish onClick={publish} testId="nav-publish" />
+        <DockItem label="作品" icon={<IconFilm size={22} />} active={tab === 'works'} onClick={() => setTab('works')} testId="tab-works" />
+        <DockItem label="我的" icon={<IconUser size={22} />} active={tab === 'me'} onClick={() => setTab('me')} testId="tab-me" />
       </nav>
+    </div>
+  );
+}
+
+/** 广场：这一版先占位（D-55），开放后展示商家公开的成片 */
+function PlazaTab({ onPublish }: { onPublish: () => void }) {
+  return (
+    <div className="ui-pad">
+      <div className="ui-greeting">
+        <h1 className="ui-page-title">广场</h1>
+        <p className="ui-lead">看看其他商家用 AI 做的带货视频</p>
+      </div>
+      <div className="ui-empty" data-testid="plaza-empty">
+        <div className="ui-title">广场即将开放</div>
+        <p className="ui-caption">开放后，商家公开的成片会出现在这里，可以按品类浏览</p>
+        <button type="button" className="ui-btn ui-btn--surface ui-pressable" onClick={onPublish}>
+          先发布自己的商品视频
+        </button>
+      </div>
     </div>
   );
 }
@@ -226,7 +227,6 @@ function CreateTab({
   query,
   list,
   works,
-  creating,
   onCreate,
   onOpen,
   onOpenWork,
@@ -236,7 +236,6 @@ function CreateTab({
   query: { isLoading: boolean; isError: boolean; refetch: () => unknown };
   list: ProjectItem[];
   works: ProjectItem[];
-  creating: boolean;
   onCreate: () => void;
   onOpen: (id: string) => void;
   onOpenWork: (id: string) => void;
@@ -259,22 +258,11 @@ function CreateTab({
       </div>
 
       <div className="ui-pad">
-        <button
-          type="button"
-          className="ui-create-bar ui-pressable"
-          data-testid="new-project"
-          disabled={creating}
-          onClick={onCreate}
-        >
+        <button type="button" className="ui-create-bar ui-pressable" data-testid="new-project" onClick={onCreate}>
           <IconPackage size={22} />
-          {/* 文案不要含“开始”：端到端测试用按钮名“开始”定位新建对话框的确认按钮 */}
-          <span className="ui-create-bar__text">输入商品名称，生成视频</span>
+          <span className="ui-create-bar__text">上传商品图，生成带货视频</span>
           <span className="ui-create-bar__go">
-            {creating ? (
-              <SpinLoading color="white" style={{ '--size': '20px' } as React.CSSProperties} />
-            ) : (
-              <IconSparkle size={20} />
-            )}
+            <IconSparkle size={20} />
           </span>
         </button>
       </div>
@@ -498,7 +486,7 @@ function WorksTab({
           <div className="ui-title">还没有成片</div>
           <p className="ui-caption">完成一条视频后会出现在这里</p>
           <button type="button" className="ui-btn ui-btn--primary ui-pressable" onClick={onCreate}>
-            新建商品视频
+            发布商品视频
           </button>
         </div>
       ) : (
