@@ -1,6 +1,6 @@
 # AI 电商营销视频｜第一版
 
-**版本**：v0.4 · 2026-11-11（v0.1 存档于 `交接包/` 与 `设计方案.md`）  
+**版本**：v0.4 · 2026-11-11（v0.1 至 v0.3 的旧文档已删除，可在 git 历史中查看）  
 **定位**：面向普通电商卖家的 To C 创作产品，首发海外，第一版为 H5  
 **生成方式**：按 Kickart 的设计，先用文字定好方案（素材理解 → 4 条故事线 → 故事板），再逐镜头调用视频模型生成，最后用 Remotion 拼接并叠加字幕。模型通用、多家并存：视频 Gemini Omni 1.2 Flash（默认）/ Seedance 2.5，图片 Nano Banana 2.1（默认）/ Seedream 5.0 pro，大模型默认 DeepSeek（可配置为其他 OpenAI 兼容接口）。
 
@@ -45,7 +45,7 @@ npm run smoke:real -w @ai-creative/server -- --image 商品图.jpg --yes   # 真
 4. [`docs/01-竞品与设计依据.md`](docs/01-竞品与设计依据.md) — Kickart / Aidge 公开能力与借鉴矩阵。
 5. `docs/02`–`05`、[`docs/mvp-flows.md`](docs/mvp-flows.md)、[`docs/first-batch-tasks.md`](docs/first-batch-tasks.md) — v0.2 的产品、工作流、架构与计划（开头有 v0.3 提示）。
 6. [`AGENTS.md`](AGENTS.md) — 编码代理需要遵守的项目约束。
-7. [`设计方案-v0.3.md`](设计方案-v0.3.md) — v0.3 时的合并版（decisions、07、06、AGENTS 约束）；v0.4 的变化以 decisions、06、07 为准。
+7. [`.kiro/steering/mobile-ui.md`](.kiro/steering/mobile-ui.md) — H5 移动端 UI 设计规范与截图验收标准。
 
 ## 边界
 

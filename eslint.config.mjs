@@ -5,7 +5,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/.data/**', '**/.tmp/**', '交接包/**', 'apps/h5/e2e/screenshots/**', '**/*.config.js'],
+    ignores: ['**/dist/**', '**/node_modules/**', '**/.data/**', '**/.tmp/**', 'apps/h5/e2e/screenshots/**', '**/*.config.js'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
