@@ -1,18 +1,25 @@
-import { ActionSheet, Dialog, Input, TextArea, Toast } from 'antd-mobile';
+import { ActionSheet, Dialog, Input, TextArea, Toast, type ActionSheetProps } from 'antd-mobile';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, showError } from '../api';
-import { AssetImage, BottomBar, ChatBox, FlowPage, Loading, PageHeader, Section, UploadButton, uploadFiles, UploadHero } from '../components';
+import { AssetImage, BottomBar, FlowPage, Loading, PageHeader, Section, UploadButton, uploadFiles, UploadHero } from '../components';
 import { useProject, useRefreshProject } from '../hooks';
 import type { AssetKind, AssetView, FactView, ProjectView } from '../types';
-import { IconClose, IconEdit, IconSparkle, IconTrash } from '../ui/icons';
-import { Btn, Field, IconButton, Pill, type Tone } from '../ui/kit';
+import { IconAlert, IconCheck, IconChevronRight, IconClose, IconEdit, IconPlus, IconRefresh, IconSparkle } from '../ui/icons';
+import { Btn, cx, Field, IconButton, Notice, Pill, Sheet, type Tone } from '../ui/kit';
+
+/**
+ * 确认卖点页（发布流程第 3 步，D-56）：商家只需要点选至少 1 条卖点。
+ * 商品名称由 AI 起，点一下可以改；描述、目标受众、人物图、场景图收进“更多（选填）”。
+ */
 
 const QUALITY: Record<string, { text: string; tone: Tone }> = {
   good: { text: '质量好', tone: 'success' },
   fair: { text: '可用', tone: 'warning' },
   poor: { text: '质量差', tone: 'danger' },
 };
+
+const needsFace = (a: AssetView) => a.origin === 'UPLOAD' && a.face === 'DETECTED' && a.faceResolution === 'NONE';
 
 function faceLabel(a: AssetView, view: ProjectView): string | null {
   if (a.face !== 'DETECTED') return null;
@@ -28,11 +35,29 @@ function faceLabel(a: AssetView, view: ProjectView): string | null {
   }
 }
 
-function AssetCard({ asset, view, onChanged }: { asset: AssetView; view: ProjectView; onChanged: () => void }) {
-  const [sheet, setSheet] = useState(false);
-  const face = faceLabel(asset, view);
-  const replacement = asset.replacementAssetId ? view.assets.find((a) => a.id === asset.replacementAssetId) : undefined;
+function faceActions(asset: AssetView, view: ProjectView, resolve: (body: Record<string, unknown>) => void): ActionSheetProps['actions'] {
+  return [
+    ...(asset.kind === 'CHARACTER' && view.virtualPortraits.length
+      ? view.virtualPortraits.map((p) => ({
+          key: `vp-${p.id}`,
+          text: `换成虚拟人像：${p.name}`,
+          description: p.description,
+          onClick: () => resolve({ resolution: 'VIRTUAL_PORTRAIT', virtualPortraitId: p.id }),
+        }))
+      : []),
+    ...(asset.kind === 'CHARACTER'
+      ? [{ key: 'similar', text: 'AI 按照片风格生成相似人物', description: '只参考年龄、发型、穿着等风格，生成一个新的人', onClick: () => resolve({ resolution: 'AI_SIMILAR' }) }]
+      : []),
+    {
+      key: 'exclude',
+      text: '这张图不用作参考',
+      description: asset.kind === 'CHARACTER' ? '人物只靠文字描述' : '可以在故事板里让 AI 重新生成',
+      onClick: () => resolve({ resolution: 'EXCLUDED' }),
+    },
+  ];
+}
 
+function useAssetActions(asset: AssetView, onChanged: () => void) {
   const resolve = async (body: Record<string, unknown>) => {
     try {
       await api.post(`/app/v1/assets/${asset.id}/face`, body);
@@ -41,22 +66,6 @@ function AssetCard({ asset, view, onChanged }: { asset: AssetView; view: Project
       showError(err);
     }
   };
-
-  const actions = [
-    ...(asset.kind === 'CHARACTER' && view.virtualPortraits.length
-      ? view.virtualPortraits.map((p) => ({
-          key: `vp-${p.id}`,
-          text: `换成虚拟人像：${p.name}`,
-          description: p.description,
-          onClick: () => void resolve({ resolution: 'VIRTUAL_PORTRAIT', virtualPortraitId: p.id }),
-        }))
-      : []),
-    ...(asset.kind === 'CHARACTER'
-      ? [{ key: 'similar', text: 'AI 按照片风格生成相似人物', description: '只参考年龄、发型、穿着等风格，生成一个新的人', onClick: () => void resolve({ resolution: 'AI_SIMILAR' }) }]
-      : []),
-    { key: 'exclude', text: '这张图不用作参考', description: asset.kind === 'CHARACTER' ? '人物只靠文字描述' : '可以在故事板里让 AI 重新生成', onClick: () => void resolve({ resolution: 'EXCLUDED' }) },
-  ];
-
   const remove = async () => {
     if (!(await Dialog.confirm({ content: '删除这张图片？' }))) return;
     try {
@@ -66,7 +75,15 @@ function AssetCard({ asset, view, onChanged }: { asset: AssetView; view: Project
       showError(err);
     }
   };
+  return { resolve, remove };
+}
 
+/** 人物图、场景图（在“更多”里）：保留完整的人脸处理 */
+function AssetCard({ asset, view, onChanged }: { asset: AssetView; view: ProjectView; onChanged: () => void }) {
+  const [sheet, setSheet] = useState(false);
+  const { resolve, remove } = useAssetActions(asset, onChanged);
+  const face = faceLabel(asset, view);
+  const replacement = asset.replacementAssetId ? view.assets.find((a) => a.id === asset.replacementAssetId) : undefined;
   const quality = asset.quality?.level ? QUALITY[asset.quality.level] : undefined;
   const unresolved = asset.faceResolution === 'NONE';
   return (
@@ -78,11 +95,9 @@ function AssetCard({ asset, view, onChanged }: { asset: AssetView; view: Project
         </button>
       </div>
       <div className="ui-tile__meta">
-        {asset.viewRole && <Pill className="on-bg">{asset.viewRole}</Pill>}
         {quality && <Pill tone={quality.tone}>{quality.text}</Pill>}
         {asset.face === 'UNKNOWN' && !asset.quality && <Pill className="on-bg">检查中</Pill>}
       </div>
-      {asset.quality?.issues?.length ? <div className="ui-tile__note is-warn">{asset.quality.issues.join('、')}</div> : null}
       {face && (
         <div className="ui-face">
           <div className={`ui-tile__note ${unresolved ? 'is-danger' : 'is-ok'}`}>{face}</div>
@@ -93,7 +108,7 @@ function AssetCard({ asset, view, onChanged }: { asset: AssetView; view: Project
       )}
       <ActionSheet
         visible={sheet}
-        actions={actions}
+        actions={faceActions(asset, view, (b) => void resolve(b))}
         extra="视频模型不接受直接上传的真人照片，请选择怎么处理"
         cancelText="取消"
         closeOnAction
@@ -103,68 +118,163 @@ function AssetCard({ asset, view, onChanged }: { asset: AssetView; view: Project
   );
 }
 
-function FactRow({ fact, onChanged }: { fact: FactView; onChanged: () => void }) {
-  const confirmed = fact.source === 'MERCHANT_CONFIRMED';
-  const act = async (fn: () => Promise<unknown>) => {
-    try {
-      await fn();
-      onChanged();
-    } catch (err) {
-      showError(err);
-    }
-  };
-  const edit = async () => {
-    let text = fact.text;
-    const ok = await Dialog.confirm({
-      title: '修改卖点',
-      content: <TextArea defaultValue={fact.text} onChange={(v) => (text = v)} autoSize maxLength={80} />,
-    });
-    if (ok && text.trim()) await act(() => api.patch(`/app/v1/facts/${fact.id}`, { text: text.trim() }));
-  };
-  return (
-    <div className="ui-fact" data-testid={confirmed ? 'fact-confirmed' : 'fact-suggested'}>
-      <div className="ui-fact__text">{fact.text}</div>
-      <div className="ui-fact__foot">
-        <Pill tone={confirmed ? 'success' : 'warning'}>{confirmed ? '已确认' : 'AI 建议'}</Pill>
-        <span className="ui-spacer" />
-        <IconButton label="修改卖点" size="sm" tone="surface" onClick={() => void edit()}>
-          <IconEdit size={17} />
-        </IconButton>
-        <IconButton label="删除卖点" size="sm" tone="surface" onClick={() => void act(() => api.del(`/app/v1/facts/${fact.id}`))}>
-          <IconTrash size={17} />
-        </IconButton>
-        {!confirmed && (
-          <Btn size="sm" variant="primary" onClick={() => void act(() => api.patch(`/app/v1/facts/${fact.id}`, { confirm: true }))} data-testid="fact-confirm">
-            确认
-          </Btn>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function AssetGrid({
-  projectId,
-  kind,
-  addText,
-  assets,
-  view,
-  onChanged,
-}: {
-  projectId: string;
-  kind: AssetKind;
-  addText: string;
-  assets: AssetView[];
-  view: ProjectView;
-  onChanged: () => void;
-}) {
+function AssetGrid({ projectId, kind, assets, view, onChanged }: { projectId: string; kind: AssetKind; assets: AssetView[]; view: ProjectView; onChanged: () => void }) {
   return (
     <div className="ui-tiles">
       {assets.map((a) => (
         <AssetCard key={a.id} asset={a} view={view} onChanged={onChanged} />
       ))}
-      <UploadButton projectId={projectId} kind={kind} text={addText} variant="tile" onUploaded={onChanged} />
+      <UploadButton projectId={projectId} kind={kind} text="上传" variant="tile" onUploaded={onChanged} />
     </div>
+  );
+}
+
+/** 顶部商品图缩略图：需要处理的图右上角有红点；点开看提示、处理或删除 */
+function ProductThumb({ asset, index, view, onChanged }: { asset: AssetView; index: number; view: ProjectView; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const { resolve, remove } = useAssetActions(asset, onChanged);
+  const face = needsFace(asset);
+  const issues = asset.quality?.issues ?? [];
+  const extra = face
+    ? '这张图里有真人脸，视频模型不接受。可以不用它作参考，或者删除'
+    : issues.length
+      ? `这张图：${issues.join('、')}。换一张纯色背景的效果更好`
+      : `第 ${index + 1} 张商品图`;
+  const actions: ActionSheetProps['actions'] = [
+    ...(face ? faceActions(asset, view, (b) => void resolve(b)) : []),
+    { key: 'remove', text: '删除这张图', danger: true, onClick: () => void remove() },
+  ];
+  return (
+    <>
+      <button type="button" className="ui-thumb" aria-label={`第 ${index + 1} 张商品图`} onClick={() => setOpen(true)} data-testid="asset-PRODUCT">
+        {asset.url && <img src={asset.url} alt="" />}
+        {(face || asset.quality?.level === 'poor') && <span className="ui-thumb__flag" aria-hidden="true" />}
+        {!face && asset.quality?.level === 'fair' && issues.length > 0 && <span className="ui-thumb__flag is-warn" aria-hidden="true" />}
+      </button>
+      <ActionSheet visible={open} actions={actions} extra={extra} cancelText="取消" closeOnAction onClose={() => setOpen(false)} />
+    </>
+  );
+}
+
+function ThumbAdd({ projectId, onUploaded }: { projectId: string; onUploaded: () => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <>
+      <input
+        ref={input}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        multiple
+        hidden
+        data-testid="upload-PRODUCT"
+        onChange={async (e) => {
+          const files = Array.from(e.target.files ?? []);
+          e.target.value = '';
+          if (!files.length) return;
+          setBusy(true);
+          await uploadFiles(projectId, 'PRODUCT', files);
+          setBusy(false);
+          onUploaded();
+        }}
+      />
+      <button type="button" className="ui-thumb-add" aria-label="继续添加商品图" disabled={busy} onClick={() => input.current?.click()}>
+        {busy ? <span className="ui-spinner" aria-hidden="true" /> : <IconPlus size={18} />}
+      </button>
+    </>
+  );
+}
+
+const basisText = (f: FactView) =>
+  f.origin === 'MERCHANT' ? '你写的' : f.basis.includes('图片') ? '依据：图片' : f.basis ? '依据：你的介绍' : 'AI 建议';
+
+/** 卖点一行：点整行选中或取消，点铅笔修改 */
+function PointRow({ fact, onToggle, onEdit, busy }: { fact: FactView; onToggle: () => void; onEdit: () => void; busy: boolean }) {
+  const on = fact.source === 'MERCHANT_CONFIRMED';
+  return (
+    <div className="ui-point" data-testid={on ? 'fact-confirmed' : 'fact-suggested'}>
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={on}
+        className="ui-check-row"
+        disabled={busy}
+        onClick={onToggle}
+        data-testid={on ? 'fact-unconfirm' : 'fact-confirm'}
+      >
+        <span className="ui-check" aria-hidden="true">
+          {on && <IconCheck size={14} />}
+        </span>
+        <span className="ui-check-row__body">
+          {fact.text}
+          <span className="ui-point__basis">{basisText(fact)}</span>
+        </span>
+      </button>
+      <IconButton label="修改这条卖点" size="sm" tone="surface" onClick={onEdit} data-testid="fact-edit">
+        <IconEdit size={17} />
+      </IconButton>
+    </div>
+  );
+}
+
+type Editing = { mode: 'add' } | { mode: 'edit'; fact: FactView } | null;
+
+function PointSheet({
+  editing,
+  onClose,
+  onSave,
+  onDelete,
+}: {
+  editing: Editing;
+  onClose: () => void;
+  onSave: (text: string) => Promise<void>;
+  onDelete: (fact: FactView) => Promise<void>;
+}) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setText(editing?.mode === 'edit' ? editing.fact.text : ''), [editing]);
+  const own = editing?.mode === 'edit' && editing.fact.origin === 'MERCHANT';
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    try {
+      await fn();
+      onClose();
+    } catch (err) {
+      showError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Sheet
+      visible={Boolean(editing)}
+      onClose={onClose}
+      title={editing?.mode === 'add' ? '自己加一条卖点' : '修改卖点'}
+      testId="fact-sheet"
+      footer={
+        <>
+          {own && editing?.mode === 'edit' && (
+            <Btn size="lg" variant="secondary" disabled={busy} onClick={() => void run(() => onDelete(editing.fact))}>
+              删除
+            </Btn>
+          )}
+          <Btn block size="lg" variant="primary" loading={busy} disabled={!text.trim()} onClick={() => void run(() => onSave(text.trim()))} data-testid="fact-save">
+            {editing?.mode === 'add' ? '添加' : '保存'}
+          </Btn>
+        </>
+      }
+    >
+      <TextArea
+        className="ui-input"
+        placeholder="功能 + 数据 + 场景，例如“鞋底加厚 2cm，久站不累”"
+        value={text}
+        onChange={setText}
+        autoSize={{ minRows: 2, maxRows: 4 }}
+        maxLength={80}
+        data-testid="fact-input"
+      />
+      <p className="ui-field__hint ui-mt-sm">保存后会自动选中，出现在口播和字幕里。只写商品真实具备的特点</p>
+    </Sheet>
   );
 }
 
@@ -174,19 +284,36 @@ export function ProductPage() {
   const [params, setParams] = useSearchParams();
   const { data: view, isLoading } = useProject(projectId);
   const refresh = useRefreshProject(projectId);
-  const [form, setForm] = useState({ name: '', description: '', targetAudience: '' });
-  const [newFact, setNewFact] = useState('');
+  const [form, setForm] = useState({ description: '', targetAudience: '' });
   const [analyzing, setAnalyzing] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState('');
   const [next, setNext] = useState(false);
   const [heroBusy, setHeroBusy] = useState(false);
+  const [toggling, setToggling] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Editing>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
   const autoAnalyzed = useRef(false);
 
   useEffect(() => {
-    if (view) setForm({ name: view.product.name, description: view.product.description, targetAudience: view.product.targetAudience });
-  }, [view?.product.name, view?.product.description, view?.product.targetAudience]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (view) setForm({ description: view.product.description, targetAudience: view.product.targetAudience });
+  }, [view?.product.description, view?.product.targetAudience]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 从发布表单进来（?analyze=1）：自动做一次素材理解，填好商品名称和卖点建议
+  const analyze = async () => {
+    setAnalyzing(true);
+    setAnalyzeError('');
+    try {
+      await api.post(`/app/v1/projects/${projectId}/analyze`);
+      await refresh();
+      return true;
+    } catch (err) {
+      setAnalyzeError(err instanceof Error ? err.message : '没能识别商品');
+      return false;
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  // 从发布表单进来（?analyze=1）：自动做一次素材理解，起名并提炼卖点
   const wantAuto = params.get('analyze') === '1';
   const canAuto = Boolean(view && !view.product.analyzedAt && view.assets.some((a) => a.kind === 'PRODUCT' && a.origin === 'UPLOAD'));
   useEffect(() => {
@@ -196,13 +323,27 @@ export function ProductPage() {
     if (canAuto) void analyze();
   }, [wantAuto, view, canAuto]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (isLoading || !view) return <Loading />;
-  const uploads = (kind: AssetKind) => view.assets.filter((a) => a.kind === kind && a.origin === 'UPLOAD');
-  const dirty =
-    form.name !== view.product.name || form.description !== view.product.description || form.targetAudience !== view.product.targetAudience;
+  // 人物图里有没处理的真人脸时自动展开“更多”
+  const characterFace = Boolean(view?.assets.some((a) => a.kind !== 'PRODUCT' && needsFace(a)));
+  useEffect(() => {
+    if (characterFace) setMoreOpen(true);
+  }, [characterFace]);
 
-  const save = async () => {
-    setSaving(true);
+  if (isLoading || !view) return <Loading />;
+
+  const uploads = (kind: AssetKind) => view.assets.filter((a) => a.kind === kind && a.origin === 'UPLOAD');
+  const productImages = uploads('PRODUCT');
+  const facts = view.product.facts;
+  const selected = facts.filter((f) => f.source === 'MERCHANT_CONFIRMED');
+  const name = view.product.name.trim();
+  const aiName = view.product.analysis?.productName;
+  const pending = analyzing && facts.length === 0;
+  const dirty = form.description !== view.product.description || form.targetAudience !== view.product.targetAudience;
+  const anyFace = view.assets.some(needsFace);
+  const onChanged = () => void refresh();
+
+  const saveMore = async () => {
+    if (!dirty) return true;
     try {
       await api.patch(`/app/v1/projects/${projectId}/product`, form);
       await refresh();
@@ -210,40 +351,68 @@ export function ProductPage() {
     } catch (err) {
       showError(err);
       return false;
-    } finally {
-      setSaving(false);
     }
   };
 
-  const analyze = async () => {
-    if (dirty && !(await save())) return;
-    setAnalyzing(true);
+  const reanalyze = async () => {
+    if (!(await saveMore())) return;
+    if (await analyze()) Toast.show({ content: '已按新信息重新识别，选中的卖点都保留了' });
+  };
+
+  const uploadFirst = async (files: File[]) => {
+    setHeroBusy(true);
+    const done = await uploadFiles(projectId, 'PRODUCT', files);
+    setHeroBusy(false);
+    await refresh();
+    if (done.length && !view.product.analyzedAt) await analyze();
+  };
+
+  const editName = async () => {
+    let value = name;
+    const ok = await Dialog.confirm({
+      title: '商品名称',
+      content: <Input defaultValue={name} placeholder="例如：灰色可拆洗猫窝" onChange={(v) => (value = v)} maxLength={60} data-testid="name-input" />,
+      confirmText: '保存',
+    });
+    if (!ok || !value.trim() || value.trim() === name) return;
     try {
-      await api.post(`/app/v1/projects/${projectId}/analyze`);
+      await api.patch(`/app/v1/projects/${projectId}/product`, { name: value.trim() });
       await refresh();
-      Toast.show({ content: '素材理解完成，请确认 AI 建议的卖点' });
     } catch (err) {
       showError(err);
-    } finally {
-      setAnalyzing(false);
     }
   };
 
-  const addFact = async () => {
-    if (!newFact.trim()) return;
+  const toggle = async (fact: FactView) => {
+    setToggling(fact.id);
     try {
-      await api.post(`/app/v1/projects/${projectId}/facts`, { text: newFact.trim() });
-      setNewFact('');
+      await api.patch(`/app/v1/facts/${fact.id}`, { confirm: fact.source !== 'MERCHANT_CONFIRMED' });
       await refresh();
     } catch (err) {
       showError(err);
+    } finally {
+      setToggling(null);
     }
+  };
+
+  const savePoint = async (text: string) => {
+    if (editing?.mode === 'edit') {
+      if (text !== editing.fact.text) await api.patch(`/app/v1/facts/${editing.fact.id}`, { text });
+      else if (editing.fact.source !== 'MERCHANT_CONFIRMED') await api.patch(`/app/v1/facts/${editing.fact.id}`, { confirm: true });
+    } else {
+      await api.post(`/app/v1/projects/${projectId}/facts`, { text });
+    }
+    await refresh();
+  };
+
+  const deletePoint = async (fact: FactView) => {
+    await api.del(`/app/v1/facts/${fact.id}`);
+    await refresh();
   };
 
   const goNext = async () => {
-    if (dirty && !(await save())) return;
-    const unresolved = view.assets.some((a) => a.origin === 'UPLOAD' && a.face === 'DETECTED' && a.faceResolution === 'NONE');
-    if (unresolved && !(await Dialog.confirm({ content: '有图片含真人脸还没处理，生成视频前需要处理。先继续吗？' }))) return;
+    if (!(await saveMore())) return;
+    if (anyFace && !(await Dialog.confirm({ content: '有图片含真人脸还没处理，生成视频前需要处理。先继续吗？' }))) return;
     if (view.storylines.length) {
       navigate(`/p/${projectId}/storylines`);
       return;
@@ -260,172 +429,189 @@ export function ProductPage() {
     }
   };
 
-  const suggested = view.product.facts.filter((f) => f.source === 'AI_SUGGESTED');
-  const confirmed = view.product.facts.filter((f) => f.source === 'MERCHANT_CONFIRMED');
-  const onChanged = () => void refresh();
-  const productImages = uploads('PRODUCT');
-  const aiName = view.product.analysis?.productName;
-  const nameTag = !form.name.trim() ? (
-    <Pill className="on-bg">选填</Pill>
-  ) : aiName && form.name === aiName ? (
-    <Pill tone="ink">
-      <IconSparkle size={10} />
-      AI 填写
-    </Pill>
-  ) : null;
-  const nameMissing = !form.name.trim();
+  // 还没有商品图：只显示大上传区
+  if (productImages.length === 0) {
+    return (
+      <FlowPage bar>
+        <PageHeader title={name || '新商品'} step={0} back="/" />
+        <Section title="商品图">
+          <UploadHero busy={heroBusy} onFiles={(files) => void uploadFirst(files)} testId="upload-PRODUCT" />
+        </Section>
+        <BottomBar>
+          <Btn block size="lg" variant="primary" disabled>
+            先添加商品图
+          </Btn>
+        </BottomBar>
+      </FlowPage>
+    );
+  }
 
-  const uploadFirst = async (files: File[]) => {
-    setHeroBusy(true);
-    const done = await uploadFiles(projectId, 'PRODUCT', files);
-    setHeroBusy(false);
-    await refresh();
-    if (done.length && !view.product.analyzedAt) await analyze();
-  };
+  const buttonText = pending
+    ? 'AI 正在看图'
+    : !name && view.product.analyzedAt
+      ? '请先填写商品名称'
+      : selected.length === 0
+        ? '至少选 1 条卖点'
+        : view.storylines.length
+          ? '查看故事线'
+          : '生成 4 条故事线';
 
   return (
     <FlowPage bar>
-      <PageHeader title={view.product.name || '新商品'} step={0} back="/" />
+      <PageHeader title={name || '新商品'} step={0} back="/" />
 
-      <Section
-        title="商品图"
-        desc={productImages.length ? '纯色干净背景、无多余文字、商品占画面一半以上；多拍几个角度（正面、侧面、细节、包装内部）' : undefined}
-      >
-        {productImages.length ? (
-          <AssetGrid projectId={projectId} kind="PRODUCT" addText="继续添加" assets={productImages} view={view} onChanged={onChanged} />
-        ) : (
-          <UploadHero busy={heroBusy} onFiles={(files) => void uploadFirst(files)} testId="upload-PRODUCT" />
-        )}
-      </Section>
-
-      <Section
-        title="商品信息"
-        extra={
-          dirty ? (
-            <Btn size="sm" variant="primary" loading={saving} onClick={() => void save()}>
-              保存
-            </Btn>
-          ) : undefined
-        }
-      >
-        <Field
-          label={
-            <span className="ui-field__label-row">
-              商品名称
-              {nameTag}
-            </span>
-          }
-          hint={nameMissing ? '不填也可以，AI 素材理解时会帮你填写' : '包含品类和核心特征，例如“灰色可拆洗猫窝”'}
-        >
-          <Input
-            className="ui-input"
-            placeholder="例如：灰色可拆洗猫窝"
-            value={form.name}
-            onChange={(v) => setForm({ ...form, name: v })}
-            maxLength={60}
-            data-testid="product-name"
-          />
-        </Field>
-        <Field label="商品描述" hint="使用场景、具体参数、体感，例如“适合夏天的网面跑鞋，重量 180g”">
-          <TextArea
-            className="ui-input"
-            value={form.description}
-            onChange={(v) => setForm({ ...form, description: v })}
-            autoSize={{ minRows: 2 }}
-            maxLength={1000}
-            data-testid="product-desc"
-          />
-        </Field>
-        <Field label="目标受众" hint="年龄 + 身份 + 核心需求，例如“25-35 岁通勤女性，关注舒适”">
-          <Input
-            className="ui-input"
-            value={form.targetAudience}
-            onChange={(v) => setForm({ ...form, targetAudience: v })}
-            maxLength={200}
-            data-testid="product-audience"
-          />
-        </Field>
-      </Section>
-
-      <Section
-        title="卖点"
-        desc="只有“已确认”的卖点会出现在口播和字幕里。卖点越具体越好：功能 + 数据 + 场景"
-        extra={
-          <Btn size="sm" variant="secondary" icon={<IconSparkle size={14} />} loading={analyzing} onClick={() => void analyze()} data-testid="analyze">
-            AI 素材理解
-          </Btn>
-        }
-      >
-        <div className="ui-stack">
-          {[...suggested, ...confirmed].map((f) => (
-            <FactRow key={f.id} fact={f} onChanged={onChanged} />
-          ))}
-          <div className="ui-inline-form">
-            <Input
-              className="ui-input"
-              placeholder="添加卖点，如“鞋底加厚 2cm，久站不累”"
-              value={newFact}
-              onChange={setNewFact}
-              onEnterPress={() => void addFact()}
-              maxLength={80}
-              data-testid="new-fact"
-            />
-            <Btn variant="secondary" disabled={!newFact.trim()} onClick={() => void addFact()} data-testid="add-fact">
-              添加
-            </Btn>
-          </div>
+      {anyFace && (
+        <div className="ui-notice-wrap">
+          <Notice tone="danger" icon={<IconAlert size={16} />}>
+            有图片含真人脸，视频模型不接受。{characterFace ? '请在下方“更多”里处理人物图' : '点带红点的商品图处理'}
+          </Notice>
         </div>
-        {view.product.analysis && (view.product.analysis.missingInfo.length > 0 || view.product.analysis.suggestions.length > 0) && (
-          <div className="ui-analysis">
-            {view.product.analysis.missingInfo.length > 0 && (
-              <div>
-                <b>还缺：</b>
-                {view.product.analysis.missingInfo.join('；')}
-              </div>
+      )}
+
+      <section className="ui-block">
+        <div className="ui-thumbs" aria-label="商品图">
+          {productImages.map((a, i) => (
+            <ProductThumb key={a.id} asset={a} index={i} view={view} onChanged={onChanged} />
+          ))}
+          <ThumbAdd projectId={projectId} onUploaded={onChanged} />
+        </div>
+      </section>
+
+      {pending && (
+        <section className="ui-block">
+          <div className="ui-ai-status" role="status">
+            <span className="ui-spinner" aria-hidden="true" />
+            AI 正在看图，起名字、提炼卖点，大约 10 秒
+          </div>
+        </section>
+      )}
+
+      {analyzeError && !analyzing && (
+        <div className="ui-notice-wrap">
+          <Notice
+            tone="warning"
+            icon={<IconAlert size={16} />}
+            action={
+              <Btn size="xs" variant="surface" onClick={() => void analyze()}>
+                重试
+              </Btn>
+            }
+          >
+            没能识别商品：{analyzeError}。也可以直接自己写卖点
+          </Notice>
+        </div>
+      )}
+
+      <section className="ui-block">
+        <button type="button" className="ui-name-card" onClick={() => void editName()} disabled={pending} data-testid="product-name">
+          <span className="ui-name-card__body">
+            <span className="ui-name-card__label">商品名称</span>
+            {pending ? (
+              <span className="ui-skel ui-skel-line ui-skel-line--name" />
+            ) : (
+              <span className={cx('ui-name-card__value', !name && 'is-empty')} data-testid="product-name-value">
+                {name || '点这里填写商品名称'}
+              </span>
             )}
-            {view.product.analysis.suggestions.length > 0 && (
-              <div>
-                <b>建议：</b>
-                {view.product.analysis.suggestions.join('；')}
-              </div>
-            )}
+          </span>
+          {name && aiName && name === aiName && (
+            <Pill tone="ink">
+              <IconSparkle size={10} />
+              AI 填写
+            </Pill>
+          )}
+          <span className="ui-icon-btn ui-icon-btn--sm ui-icon-btn--surface" aria-hidden="true">
+            <IconEdit size={17} />
+          </span>
+        </button>
+      </section>
+
+      <Section title="选卖点" extra={!pending && <span className="ui-caption">已选 {selected.length} 条</span>}>
+        <p className="ui-block__desc">选中的卖点会出现在口播和字幕里，至少选 1 条</p>
+        <div className="ui-checklist">
+          {pending
+            ? [72, 86, 64].map((w) => (
+                <div key={w} className="ui-skel-point">
+                  <span className="ui-skel ui-skel-point__dot" />
+                  <span className="ui-skel ui-skel-line" style={{ '--w': `${w}%` } as React.CSSProperties} />
+                </div>
+              ))
+            : facts.map((f) => (
+                <PointRow key={f.id} fact={f} busy={toggling === f.id} onToggle={() => void toggle(f)} onEdit={() => setEditing({ mode: 'edit', fact: f })} />
+              ))}
+          {!pending && (
+            <button type="button" className="ui-point-add" onClick={() => setEditing({ mode: 'add' })} data-testid="add-fact">
+              <span className="ui-point-add__icon">
+                <IconPlus size={14} />
+              </span>
+              自己加一条
+            </button>
+          )}
+        </div>
+      </Section>
+
+      <section className="ui-block">
+        <button type="button" className="ui-more" aria-expanded={moreOpen} onClick={() => setMoreOpen(!moreOpen)} data-testid="more-toggle">
+          <span className="ui-more__body">
+            <span className="ui-more__title">更多（选填）</span>
+            <span className="ui-more__sub">{moreOpen ? '不填也能生成，填了 AI 会更贴合' : '商品描述、目标受众、人物图、场景图'}</span>
+          </span>
+          <span className="ui-more__chev">
+            <IconChevronRight size={18} />
+          </span>
+        </button>
+
+        {moreOpen && (
+          <div className="ui-more-body">
+            <Field label="商品描述" hint="使用场景、具体参数、体感">
+              <TextArea
+                className="ui-input"
+                placeholder="例如：适合夏天的网面跑鞋，重量 180g"
+                value={form.description}
+                onChange={(v) => setForm({ ...form, description: v })}
+                onBlur={() => void saveMore()}
+                autoSize={{ minRows: 2 }}
+                maxLength={1000}
+                data-testid="product-desc"
+              />
+            </Field>
+            <Field label="目标受众">
+              <Input
+                className="ui-input"
+                placeholder="例如：25-35 岁养猫的上班族"
+                value={form.targetAudience}
+                onChange={(v) => setForm({ ...form, targetAudience: v })}
+                onBlur={() => void saveMore()}
+                maxLength={200}
+                data-testid="product-audience"
+              />
+            </Field>
+            <Field label="人物图" hint="不传时 AI 会在故事板里生成人物；真人照片需要换成 AI 相似人物">
+              <AssetGrid projectId={projectId} kind="CHARACTER" assets={uploads('CHARACTER')} view={view} onChanged={onChanged} />
+            </Field>
+            <Field label="场景图" hint="不传时 AI 会在故事板里生成场景">
+              <AssetGrid projectId={projectId} kind="SCENE" assets={uploads('SCENE')} view={view} onChanged={onChanged} />
+            </Field>
+            <Btn size="sm" variant="ghost" icon={<IconRefresh size={16} />} loading={analyzing} onClick={() => void reanalyze()} className="ui-mt" data-testid="analyze">
+              按新信息重新识别卖点
+            </Btn>
           </div>
         )}
-      </Section>
+      </section>
 
-      <Section
-        title="人物和场景"
-        desc={`可选。不上传时，AI 会在故事板里生成。真人照片需要换成${view.virtualPortraits.length ? '虚拟人像或 ' : ' '}AI 相似人物`}
-      >
-        <div className="ui-sub-title">人物图</div>
-        <AssetGrid projectId={projectId} kind="CHARACTER" addText="上传人物图" assets={uploads('CHARACTER')} view={view} onChanged={onChanged} />
-        <div className="ui-sub-title">场景图</div>
-        <AssetGrid projectId={projectId} kind="SCENE" addText="上传场景图" assets={uploads('SCENE')} view={view} onChanged={onChanged} />
-      </Section>
-
-      <ChatBox projectId={projectId} page="product" onApplied={onChanged} />
+      <PointSheet editing={editing} onClose={() => setEditing(null)} onSave={savePoint} onDelete={deletePoint} />
 
       <BottomBar>
         <Btn
           block
           size="lg"
           variant="primary"
-          loading={next || analyzing}
-          disabled={productImages.length === 0 || confirmed.length === 0 || nameMissing}
+          loading={next}
+          disabled={pending || !name || selected.length === 0}
           onClick={() => void goNext()}
           data-testid="to-storylines"
         >
-          {productImages.length === 0
-            ? '先添加商品图'
-            : analyzing
-              ? 'AI 正在理解商品'
-              : confirmed.length === 0
-                ? '请先确认至少一条卖点'
-                : nameMissing
-                  ? '请先填写商品名称'
-                  : view.storylines.length
-                    ? '查看故事线'
-                    : '下一步：生成 4 条故事线'}
+          {buttonText}
         </Btn>
       </BottomBar>
     </FlowPage>

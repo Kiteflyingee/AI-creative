@@ -31,7 +31,7 @@ test('完整创作流程：素材 → 故事线 → 故事板 → 生成 → 改
   // 发布：直接进入发布表单，不填商品名称
   await page.getByTestId('nav-publish').click();
   await expect(page).toHaveURL(/\/publish$/);
-  await expect(page.getByTestId('publish-name')).toBeVisible();
+  await expect(page.getByTestId('publish-intro')).toBeVisible();
   await shot(page, 'publish-form');
   // 返回主页不会留下空草稿
   await page.getByRole('button', { name: '返回' }).click();
@@ -40,16 +40,35 @@ test('完整创作流程：素材 → 故事线 → 故事板 → 生成 → 改
 
   // 选第一张商品图时才创建项目，随后自动素材理解：AI 填好商品名称并给出卖点建议
   await page.getByTestId('new-project').click();
+  await page.getByTestId('publish-intro').locator('textarea:not([aria-hidden])').fill('猫窝外罩可以拆下来洗，尺寸 50×40 厘米');
   await page.getByTestId('upload-PRODUCT').setInputFiles({ name: 'product.jpg', mimeType: 'image/jpeg', buffer: await image('#9aa5b1') });
   await expect(page).toHaveURL(/\/p\/[^/]+\/product$/);
-  await expect(page.getByTestId('product-name').locator('input')).toHaveValue('灰色可拆洗猫窝');
+  await expect(page.getByTestId('product-name-value')).toHaveText('灰色可拆洗猫窝');
   await expect(page.getByText('AI 填写')).toBeVisible();
   await expect(page.getByTestId('fact-suggested')).toBeVisible();
+  // 卖点默认不选，底部按钮不可点
+  await expect(page.getByTestId('to-storylines')).toBeDisabled();
+  await shot(page, 'confirm-points');
 
-  // 上传人物图（会被识别为含真人脸）
+  // 点选一条 AI 建议；修改它；再自己加一条（自动选中）
+  await page.getByTestId('fact-confirm').first().click();
+  await expect(page.getByTestId('fact-confirmed')).toHaveCount(1);
+  await expect(page.getByTestId('to-storylines')).toBeEnabled();
+  await page.getByTestId('fact-edit').first().click();
+  await page.getByTestId('fact-input').locator('textarea:not([aria-hidden])').fill('外罩可拆，直接放洗衣机洗');
+  await page.getByTestId('fact-save').click();
+  await expect(page.getByTestId('fact-confirmed').first()).toContainText('外罩可拆，直接放洗衣机洗');
+  await expect(page.getByTestId('fact-confirmed').first()).toContainText('你写的');
+  await page.getByTestId('add-fact').click();
+  await page.getByTestId('fact-input').locator('textarea:not([aria-hidden])').fill('尺寸 50×40 厘米，8 公斤以内的猫能躺下');
+  await page.getByTestId('fact-save').click();
+  await expect(page.getByTestId('fact-confirmed')).toHaveCount(2);
+
+  // 更多（选填）：补充信息，上传人物图（会被识别为含真人脸）
+  await page.getByTestId('more-toggle').click();
   await page.getByTestId('upload-CHARACTER').setInputFiles({ name: 'person.jpg', mimeType: 'image/jpeg', buffer: await image('#e0b090') });
   await expect(page.getByText('有真人脸，需要处理')).toBeVisible();
-  await page.getByTestId('product-desc').locator('textarea:not([aria-hidden])').fill('猫窝外罩可以拆下来洗，尺寸 50×40 厘米');
+  await expect(page.getByText('有图片含真人脸，视频模型不接受')).toBeVisible();
   await page.getByTestId('product-audience').locator('input').fill('25-35 岁养猫的上班族');
   await shot(page, 'product-uploaded-face-warning');
 
@@ -59,13 +78,12 @@ test('完整创作流程：素材 → 故事线 → 故事板 → 生成 → 改
   await page.getByText('AI 按照片风格生成相似人物').click();
   await expect(page.getByText('已换成 AI 相似人物')).toBeVisible();
 
-  // 补充信息后再做一次素材理解 → 确认 AI 建议的卖点
+  // 按新信息重新识别：选中的卖点都保留，新的 AI 建议出现
   await page.getByTestId('analyze').click();
-  await expect(page.getByText('素材理解完成，请确认 AI 建议的卖点')).toBeVisible();
-  await expect(page.getByTestId('fact-suggested')).toBeVisible();
+  await expect(page.getByText('已按新信息重新识别，选中的卖点都保留了')).toBeVisible();
+  await expect(page.getByTestId('fact-confirmed')).toHaveCount(2);
+  await expect(page.getByTestId('fact-suggested')).toHaveCount(1);
   await shot(page, 'analysis');
-  await page.getByTestId('fact-confirm').click();
-  await expect(page.getByTestId('fact-confirmed')).toBeVisible();
 
   // 故事线
   await page.getByTestId('to-storylines').click();

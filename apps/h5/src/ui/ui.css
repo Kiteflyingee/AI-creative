@@ -612,6 +612,10 @@
   margin-top: var(--ui-s6);
 }
 
+.ui-mt-sm {
+  margin-top: var(--ui-s2);
+}
+
 /* 浅灰卡片 */
 .ui-card {
   background: var(--ui-fill);
@@ -1185,6 +1189,277 @@
   align-items: center;
   font-size: 12px;
   color: var(--ui-text-2);
+}
+
+/* ---------- 确认卖点页（发布流程第 3 步） ---------- */
+
+/* 顶部商品图缩略图条：点缩略图看提示或删除，点 + 继续添加 */
+.ui-thumbs {
+  display: flex;
+  gap: var(--ui-s2);
+  overflow-x: auto;
+  margin: 0 calc(var(--ui-gutter) * -1);
+  padding: 0 var(--ui-gutter) 2px;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.ui-thumbs::-webkit-scrollbar {
+  display: none;
+}
+
+.ui-thumbs > .ui-thumb {
+  width: 56px;
+  flex: none;
+}
+
+.ui-thumb > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 需要处理的图片右上角加一个点 */
+.ui-thumb__flag {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ui-danger);
+  box-shadow: 0 0 0 2px var(--ui-surface);
+}
+
+.ui-thumb__flag.is-warn {
+  background: var(--ui-warning);
+}
+
+.ui-thumb-add {
+  width: 56px;
+  height: 72px;
+  flex: none;
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-fill);
+  color: var(--ui-text-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ui-thumb-add:disabled {
+  opacity: 0.5;
+}
+
+/* 商品名称卡片 */
+.ui-name-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 60px;
+  padding: 10px 8px 10px 16px;
+  border-radius: var(--ui-r-lg);
+  background: var(--ui-fill);
+  text-align: left;
+}
+
+.ui-name-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ui-name-card__label {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ui-text-2);
+}
+
+.ui-name-card__value {
+  font-size: 17px;
+  line-height: 24px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ui-name-card__value.is-empty {
+  color: var(--ui-danger);
+  font-size: 15px;
+  font-weight: 400;
+}
+
+/* 卖点点选行：整行点选，右侧铅笔修改 */
+.ui-point {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding-right: var(--ui-s2);
+}
+
+.ui-point + .ui-point::before,
+.ui-point + .ui-point-add::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50px;
+  right: 0;
+  height: 1px;
+  background: var(--ui-hairline);
+}
+
+.ui-point > .ui-check-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-point__basis {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--ui-text-2);
+}
+
+.ui-point-add {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--ui-s3);
+  width: 100%;
+  min-height: 56px;
+  padding: 0 var(--ui-s4);
+  font-size: 15px;
+  color: var(--ui-text-2);
+  text-align: left;
+}
+
+.ui-point-add:active {
+  background: var(--ui-fill-strong);
+}
+
+.ui-point-add__icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--ui-surface);
+  color: var(--ui-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+/* 骨架行：浅灰卡片里的骨架加深一级 */
+.ui-skel-point {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-s3);
+  min-height: 56px;
+  padding: 0 var(--ui-s4);
+}
+
+.ui-skel-point + .ui-skel-point {
+  box-shadow: inset 0 1px 0 var(--ui-hairline);
+}
+
+.ui-skel-point__dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.ui-skel-line {
+  width: var(--w, 100%);
+  height: 14px;
+  border-radius: 7px;
+}
+
+.ui-skel-line--name {
+  --w: 58%;
+  margin-top: 6px;
+}
+
+:where(.ui-checklist, .ui-name-card) .ui-skel {
+  background: linear-gradient(90deg, var(--ui-fill-strong) 25%, var(--ui-fill) 50%, var(--ui-fill-strong) 75%);
+  background-size: 200% 100%;
+}
+
+/* AI 正在看图 */
+.ui-ai-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px var(--ui-s4);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-ink);
+  color: var(--ui-on-media);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ui-ai-status .ui-spinner {
+  width: 18px;
+  height: 18px;
+}
+
+/* “更多（选填）”折叠块 */
+.ui-more {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-s3);
+  width: 100%;
+  min-height: 60px;
+  padding: 0 var(--ui-s4);
+  border-radius: var(--ui-r-lg);
+  background: var(--ui-fill);
+  text-align: left;
+}
+
+.ui-more__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-more__title {
+  display: block;
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 500;
+}
+
+.ui-more__sub {
+  display: block;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--ui-text-2);
+}
+
+.ui-more__chev {
+  display: inline-flex;
+  color: var(--ui-text-3);
+  transform: rotate(90deg);
+  transition: transform var(--ui-dur) var(--ui-ease);
+}
+
+.ui-more[aria-expanded='true'] .ui-more__chev {
+  transform: rotate(-90deg);
+}
+
+.ui-more-body {
+  margin-top: var(--ui-s5);
+}
+
+.ui-more-body > .ui-field + .ui-notice,
+.ui-more-body > .ui-notice + .ui-field {
+  margin-top: 18px;
 }
 
 /* 表单项标题旁的小标签（选填、AI 填写） */

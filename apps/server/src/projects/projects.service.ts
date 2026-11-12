@@ -156,7 +156,7 @@ export class ProjectsService {
         category: product.category,
         analysis: product.analysis,
         analyzedAt: product.analyzedAt,
-        facts: product.facts.map((f) => ({ id: f.id, text: f.text, source: f.source })),
+        facts: product.facts.map((f) => ({ id: f.id, text: f.text, source: f.source, origin: f.origin, basis: f.basis })),
       },
       assets: await Promise.all(assets.map((a) => this.assetView(a))),
       storylines,

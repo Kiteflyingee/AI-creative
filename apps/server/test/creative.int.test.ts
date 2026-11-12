@@ -75,6 +75,12 @@ describe('素材、故事线、故事板与对话修改', () => {
     expect(v.product.name).toBe('灰色可拆洗猫窝');
     expect(v.project.title).toBe('灰色可拆洗猫窝');
     expect(v.product.analysis.productName).toBe('灰色可拆洗猫窝');
+    // 重新识别后仍记得名称是 AI 起的；商家改名后就不再算 AI 起的
+    await ctx.http().post(`/app/v1/projects/${projectId}/analyze`).set(auth(token)).expect(201);
+    expect((await view(projectId)).product.analysis.productName).toBe('灰色可拆洗猫窝');
+    await ctx.http().patch(`/app/v1/projects/${projectId}/product`).set(auth(token)).send({ name: '猫窝' }).expect(200);
+    await ctx.http().post(`/app/v1/projects/${projectId}/analyze`).set(auth(token)).expect(201);
+    expect((await view(projectId)).product.analysis.productName).toBe('');
 
     const named = await newProject();
     await uploadImage(ctx, token, named, 'PRODUCT');
@@ -82,6 +88,40 @@ describe('素材、故事线、故事板与对话修改', () => {
     const w = await view(named);
     expect(w.product.name).toBe('灰色猫窝');
     expect(w.product.analysis.productName).toBe('');
+  });
+
+  it('卖点可以选中、取消选中和修改；改过的 AI 建议算商家写的', async () => {
+    const projectId = await newProject();
+    await uploadImage(ctx, token, projectId, 'PRODUCT');
+    await ctx.http().post(`/app/v1/projects/${projectId}/analyze`).set(auth(token)).expect(201);
+    let fact = (await view(projectId)).product.facts[0];
+    expect(fact).toMatchObject({ source: 'AI_SUGGESTED', origin: 'AI', basis: '商家描述' });
+
+    await ctx.http().patch(`/app/v1/facts/${fact.id}`).set(auth(token)).send({ confirm: true }).expect(200);
+    await ctx.http().patch(`/app/v1/facts/${fact.id}`).set(auth(token)).send({ confirm: false }).expect(200);
+    fact = (await view(projectId)).product.facts[0];
+    expect(fact).toMatchObject({ source: 'AI_SUGGESTED', origin: 'AI' });
+    // 没有选中的卖点时不能生成故事线
+    expect((await ctx.http().post(`/app/v1/projects/${projectId}/storylines`).set(auth(token)).send({}).expect(400)).body.code).toBe('FACTS_REQUIRED');
+
+    await ctx.http().patch(`/app/v1/facts/${fact.id}`).set(auth(token)).send({ text: '外罩可拆，放洗衣机直接洗' }).expect(200);
+    fact = (await view(projectId)).product.facts[0];
+    expect(fact).toMatchObject({ text: '外罩可拆，放洗衣机直接洗', source: 'MERCHANT_CONFIRMED', origin: 'MERCHANT', basis: '' });
+  });
+
+  it('重新识别只替换 AI 写的、没选中的建议；商家写的卖点即使没选中也保留', async () => {
+    const projectId = await newProject();
+    await uploadImage(ctx, token, projectId, 'PRODUCT');
+    const own = await ctx.http().post(`/app/v1/projects/${projectId}/facts`).set(auth(token)).send({ text: '送一个替换外罩' }).expect(201);
+    await ctx.http().patch(`/app/v1/facts/${own.body.id}`).set(auth(token)).send({ confirm: false }).expect(200);
+    await ctx.http().post(`/app/v1/projects/${projectId}/analyze`).set(auth(token)).expect(201);
+    ctx.llm.on('analyze_product', () => ({ productName: '', sellingPoints: [{ text: '底部防滑', basis: '图片可见' }] }));
+    await ctx.http().post(`/app/v1/projects/${projectId}/analyze`).set(auth(token)).expect(201);
+    const facts = (await view(projectId)).product.facts;
+    expect(facts.map((f: { text: string; source: string; origin: string }) => [f.text, f.source, f.origin])).toEqual([
+      ['送一个替换外罩', 'AI_SUGGESTED', 'MERCHANT'],
+      ['底部防滑', 'AI_SUGGESTED', 'AI'],
+    ]);
   });
 
   it('再次素材理解时，和上次相同但还没处理的 AI 建议不会丢失；已确认的卖点不重复建议', async () => {

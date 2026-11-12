@@ -12,6 +12,11 @@ enum FactSource {
   AI_SUGGESTED
 }
 
+enum FactOrigin {
+  AI
+  MERCHANT
+}
+
 enum AssetKind {
   PRODUCT
   CHARACTER
@@ -122,13 +127,18 @@ model Product {
   @@index([userId, createdAt])
 }
 
-/// 卖点与商品事实。只有 MERCHANT_CONFIRMED 能进入口播与字幕
+/// 卖点与商品事实。只有 MERCHANT_CONFIRMED（商家选中）能进入口播与字幕
 model ProductFact {
   id        String     @id @default(cuid())
   productId String
   product   Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
   text      String
+  /// 是否经商家确认（发布页的点选状态）：MERCHANT_CONFIRMED = 选中；AI_SUGGESTED = 未选中
   source    FactSource
+  /// 谁写的：AI 提炼或商家自己写（含改过的 AI 建议）。重新识别只替换 AI 写的、未选中的卖点（D-56）
+  origin    FactOrigin @default(MERCHANT)
+  /// AI 提炼时的依据：“商家描述”或“图片可见”；商家写的为空
+  basis     String     @default("")
   position  Int        @default(0)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt

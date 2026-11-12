@@ -24,7 +24,12 @@ export interface AssetView {
 export interface FactView {
   id: string;
   text: string;
+  /** MERCHANT_CONFIRMED = 选中（会进入口播和字幕）；AI_SUGGESTED = 未选中 */
   source: 'MERCHANT_CONFIRMED' | 'AI_SUGGESTED';
+  /** 谁写的：AI 提炼，或商家自己写（含改过的 AI 建议） */
+  origin: 'AI' | 'MERCHANT';
+  /** AI 的依据：“商家描述”或“图片可见” */
+  basis: string;
 }
 
 export interface ClipView {

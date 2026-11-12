@@ -18,7 +18,7 @@ inclusion: always
 | `src/ui/icons.tsx` | 全部图标 |
 | `src/components.tsx` | `PageHeader`（返回 + 标题 + 五步进度）、`FlowPage`、`Section`、`BottomBar`、`Loading`、`AiBadge`、`EmptyHint`、`UploadButton`、`AssetImage`、`ChatBox` |
 
-**迁移状态（2026-11-12）**：全部 10 个页面（首页、登录、分享、发布表单，以及商品、故事线、故事板、确认、进度、作品 6 个流程页）已按本规范实现。首页是五格导航（主页、广场、发布、作品、我的），广场目前是占位页。页面里只使用 §5.2 白名单内的 antd-mobile 组件；`styles.css` 只剩全局基础样式，旧类名（`.section`、`.shot-card`、`.fact`、`.asset-*`、`.storyline-card` 等）已删除。迁移后端到端测试通过，截图见 `apps/h5/e2e/screenshots/`（iPhone 13 尺寸）；§8 要求的其他 3 个尺寸还没有逐页截图验收。
+**迁移状态（2026-11-12）**：全部 10 个页面（首页、登录、分享、发布表单，以及商品、故事线、故事板、确认、进度、作品 6 个流程页）已按本规范实现。首页是五格导航（主页、广场、发布、作品、我的），广场目前是占位页。商品页是“确认卖点”页（D-56）：每屏只要求商家做一件事，选填内容默认收起；新页面也按“必填项尽量少、选填收进‘更多’”设计。页面里只使用 §5.2 白名单内的 antd-mobile 组件；`styles.css` 只剩全局基础样式，旧类名（`.section`、`.shot-card`、`.fact`、`.asset-*`、`.storyline-card` 等）已删除。迁移后端到端测试通过，截图见 `apps/h5/e2e/screenshots/`（iPhone 13 尺寸）；§8 要求的其他 3 个尺寸还没有逐页截图验收。
 
 **仍需注意的问题**：
 
@@ -203,6 +203,11 @@ inclusion: always
 | 空状态 | `EmptyHint`（浅灰大圆角 + 一句说明 + 最多一个按钮） | antd `Empty`、插画 |
 | 加载 | 首次进入流程页用 `Loading`；列表和卡片用骨架 `ui-skel`；按钮用 `Btn loading` | 整页遮罩转圈 |
 | 图片 | `ui-tiles` / `ui-tile`（3 列）、`ui-hrail` + `ui-ref`（横滑 9:16）、`AssetImage` | `.asset-*` 旧类 |
+| 可点选并能修改的列表（卖点） | `ui-checklist` 里放 `ui-point`：左边整行是 `ui-check-row`（点选），右边一个 `IconButton` 铅笔（修改，打开 `Sheet`）；最后一行 `ui-point-add`“自己加一条” | 每条下面一排“确认 / 修改 / 删除”按钮 |
+| 已有图片的紧凑管理 | `ui-thumbs` 缩略图条（56×72）+ `ui-thumb-add`；需要处理的图右上角 `ui-thumb__flag`，点开用 `ActionSheet` 说明并处理 | 在主流程页放完整的图片网格和质量标签 |
+| 选填内容 | `ui-more` 折叠块（默认收起，副标题写清里面有什么），展开内容放 `ui-more-body` | 把选填输入框全部铺在页面上 |
+| 等待 AI | `ui-ai-status`（黑底一行说明 + 转圈）加形状一致的骨架 `ui-skel-point`、`ui-skel-line` | 整页遮罩转圈 |
+| 一个值 + 修改（如商品名称） | `ui-name-card`：小标签、大号值、来源 `Pill`、铅笔，整块可点 | 常驻输入框 |
 | 还没有图时的上传 | `UploadHero`（`ui-upload-hero`：黑色圆形加号 56、标题、说明、角度提示胶囊）；有图后换成 `ui-tiles` + `UploadButton variant="tile"`；批量上传用 `uploadFiles` | 空白的图片网格 |
 | 表单项标题旁的标签 | `ui-field__label-row` + `Pill`（“选填”用 `on-bg`，“AI 填写”用 `ink` 加 10 号星形） | 在标题后面写括号说明 |
 | 分组信息 | `ui-list` + `ui-list__row` 或 `ui-group` | 表格、灰色分组标题栏 |
@@ -278,7 +283,7 @@ antd-mobile 只允许在页面里使用：`Input`、`TextArea`、`Dialog`、`Pop
 7. 插画、emoji、库存图片、示例作品；其他图标库。
 8. 成片画面上出现非毛玻璃的实色块（AI 标识除外），或封面上缺少“AI生成”。
 9. 卡片里再嵌套卡片超过两层；弹层里再开弹层。
-10. 改动或删除 e2e 依赖的 `data-testid`（导航用 `tab-home / tab-plaza / nav-publish / tab-works / tab-me`，入口条 `new-project`，上传区 `upload-PRODUCT`）。
+10. 改动或删除 e2e 依赖的 `data-testid`（导航用 `tab-home / tab-plaza / nav-publish / tab-works / tab-me`，入口条 `new-project`，上传区 `upload-PRODUCT`，发布表单 `publish-intro`，确认卖点页 `product-name-value / fact-confirm / fact-edit / fact-input / fact-save / add-fact / more-toggle / analyze / to-storylines`）。
 11. 只看代码、类型检查或测试通过就认为 UI 完成（见 §10）。
 
 ## 10. 视觉验收标准
