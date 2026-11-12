@@ -1,12 +1,13 @@
 import { DEFAULT_RESOLUTION, type Resolution } from '@ai-creative/shared';
 import { useQuery } from '@tanstack/react-query';
-import { Button, Checkbox, NoticeBar, Selector } from 'antd-mobile';
 import { useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, newIdempotencyKey, showError } from '../api';
-import { BottomBar, Loading, PageHeader, Section } from '../components';
+import { BottomBar, FlowPage, Loading, PageHeader, Section } from '../components';
 import { useProject } from '../hooks';
 import type { JobView } from '../types';
+import { IconAlert, IconHd, IconSparkle } from '../ui/icons';
+import { Btn, CheckRow, ChoiceGroup, Notice } from '../ui/kit';
 
 const RES_LABEL: Record<Resolution, string> = { '480p': '480p 标清', '720p': '720p 高清', '1080p': '1080p 超清' };
 
@@ -42,6 +43,11 @@ export function ConfirmPage() {
   const setResolution = setPicked;
   const isOutput = view.outputs.some((o) => o.status === 'READY');
   const totalSec = shots.filter((s) => shotIds.includes(s.shotId)).reduce((sum, s) => sum + s.durationSec, 0);
+  const toggle = (shotId: string, on: boolean) => {
+    const next = on ? [...shotIds, shotId] : shotIds.filter((id) => id !== shotId);
+    // 保持故事板里的镜头顺序
+    setSelected(shots.map((s) => s.shotId).filter((id) => next.includes(id)));
+  };
 
   const confirm = async () => {
     setBusy(true);
@@ -60,50 +66,52 @@ export function ConfirmPage() {
   };
 
   return (
-    <div className="page">
+    <FlowPage bar>
       <PageHeader title="确认生成" step={3} back={isOutput ? `/p/${projectId}/work` : `/p/${projectId}/storyboard`} />
-      <Section title="清晰度">
-        <Selector
-          options={view.model.resolutions.map((r) => ({ label: RES_LABEL[r], value: r }))}
+      <Section title="清晰度" desc="画面固定为竖屏 9:16">
+        <ChoiceGroup
+          label="清晰度"
+          options={view.model.resolutions.map((r) => ({ label: RES_LABEL[r], value: r, icon: <IconHd size={18} /> }))}
           value={[resolution]}
           onChange={(v) => v[0] && setResolution(v[0])}
           data-testid="resolution"
         />
       </Section>
-      <Section title={`要生成的镜头（${shotIds.length} 个，共 ${totalSec} 秒）`}>
-        <Checkbox.Group value={shotIds} onChange={(v) => setSelected(v as string[])}>
+      <Section
+        title={`要生成的镜头（${shotIds.length} 个，共 ${totalSec} 秒）`}
+        desc="每个镜头单独生成一段带口播的视频，同时最多生成 3 个，全部完成后自动拼接并加上字幕。没选中的镜头沿用已生成的版本。"
+      >
+        <div className="ui-checklist">
           {shots.map((s, i) => (
-            <div key={s.shotId} className="confirm-shot">
-              <Checkbox value={s.shotId}>
-                镜头 {i + 1}（{s.durationSec} 秒）：{s.action || s.subject}
-              </Checkbox>
-            </div>
+            <CheckRow key={s.shotId} checked={shotIds.includes(s.shotId)} onChange={(on) => toggle(s.shotId, on)}>
+              镜头 {i + 1}（{s.durationSec} 秒）：{s.action || s.subject}
+            </CheckRow>
           ))}
-        </Checkbox.Group>
-        <p className="hint">
-          每个镜头单独生成一段带口播的视频，同时最多生成 3 个，全部完成后自动拼接并加上字幕。没选中的镜头沿用已生成的版本。
-        </p>
+        </div>
       </Section>
       {problems.length > 0 && (
         <Section title="生成前需要处理">
           {problems.map((p) => (
-            <NoticeBar key={p} content={p} color="alert" wrap />
+            <Notice key={p} tone="warning" icon={<IconAlert size={16} />}>
+              {p}
+            </Notice>
           ))}
         </Section>
       )}
       <BottomBar>
-        <Button
+        <Btn
           block
-          color="primary"
-          size="large"
+          size="lg"
+          variant="primary"
+          icon={<IconSparkle size={16} />}
           loading={busy}
           disabled={shotIds.length === 0 || problems.length > 0 || readiness.isLoading}
           onClick={() => void confirm()}
           data-testid="confirm-generate"
         >
           确认生成
-        </Button>
+        </Btn>
       </BottomBar>
-    </div>
+    </FlowPage>
   );
 }

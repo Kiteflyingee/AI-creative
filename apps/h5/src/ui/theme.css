@@ -1,0 +1,187 @@
+/*
+ * antd-mobile 外观统一（规范见 .kiro/steering/mobile-ui.md）。
+ * - 全局变量写在 :root:root 上，覆盖 antd-mobile 定义在 :root 的默认值。
+ * - 组件样式前面加 body，提高优先级，不依赖样式表的加载顺序。
+ * - 页面里只保留 Input、TextArea、Dialog、Popup、ActionSheet、Toast、SpinLoading 这几个 antd-mobile 组件。
+ */
+
+:root:root {
+  --adm-color-primary: #0e0e10;
+  --adm-color-success: #2f9e5b;
+  --adm-color-warning: #d68a00;
+  --adm-color-danger: #e5484d;
+  --adm-color-text: #0e0e10;
+  --adm-color-text-secondary: #6b6b72;
+  --adm-color-weak: #a3a3aa;
+  --adm-color-light: #b8b8be;
+  --adm-color-border: rgba(14, 14, 16, 0.08);
+  --adm-color-box: #f1f1f3;
+  --adm-color-background: #ffffff;
+  --adm-color-background-body: #fafafa;
+  --adm-color-fill-content: #f1f1f3;
+  --adm-font-family: var(--ui-font);
+  --adm-center-popup-border-radius: 26px;
+  --adm-center-popup-max-width: min(86vw, 360px);
+  --adm-center-popup-min-width: min(86vw, 300px);
+}
+
+/* ---------- 输入框：浅灰底、大圆角；16px 字号避免 iOS 聚焦时放大页面 ---------- */
+
+body .ui-input.adm-input,
+body .ui-input.adm-text-area,
+body .adm-dialog-content .adm-input,
+body .adm-dialog-content .adm-text-area {
+  --font-size: 16px;
+  --placeholder-color: var(--ui-text-3);
+  background: var(--ui-fill);
+  border-radius: var(--ui-r-md);
+  padding: 13px 16px;
+  box-sizing: border-box;
+}
+
+body .ui-input.adm-input {
+  min-height: 50px;
+}
+
+body .ui-input .adm-input-element,
+body .ui-input .adm-text-area-element,
+body .adm-dialog-content .adm-input-element,
+body .adm-dialog-content .adm-text-area-element {
+  line-height: 24px;
+}
+
+/* 对话修改框里的输入区不要底色（外层容器已经是浅灰） */
+body .ui-prompt .adm-text-area {
+  --font-size: 16px;
+  --placeholder-color: var(--ui-text-3);
+  background: transparent;
+  padding: 0 8px 0 0;
+}
+
+body .ui-prompt .adm-text-area-element {
+  line-height: 24px;
+}
+
+/* ---------- 对话框 ---------- */
+
+body .adm-dialog-body:not(.adm-dialog-with-image) {
+  padding-top: 24px;
+}
+
+body .adm-dialog-title {
+  margin-bottom: 12px;
+  padding: 0 20px;
+  font-size: 18px;
+  line-height: 26px;
+  font-weight: 500;
+}
+
+body .adm-dialog-content {
+  padding: 0 20px 20px;
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--ui-text);
+}
+
+body .adm-dialog-footer .adm-dialog-action-row {
+  border-top: 0;
+  gap: 10px;
+  padding: 0 20px 20px;
+}
+
+body .adm-dialog-footer .adm-dialog-action-row + .adm-dialog-action-row {
+  margin-top: -10px;
+}
+
+body .adm-dialog-footer .adm-dialog-action-row > .adm-dialog-button {
+  height: 50px;
+  padding: 0 12px;
+  border-radius: var(--ui-r-md);
+  border-right: 0;
+  background: var(--ui-fill);
+  color: var(--ui-ink);
+  font-size: 16px;
+  line-height: 50px;
+  font-weight: 500;
+}
+
+/* 确认类按钮（bold）和只有一个按钮时：黑底白字 */
+body .adm-dialog-footer .adm-dialog-action-row > .adm-dialog-button-bold,
+body .adm-dialog-footer .adm-dialog-action-row > .adm-dialog-button:only-child {
+  background: var(--ui-ink);
+  color: var(--ui-on-media);
+}
+
+body .adm-dialog-footer .adm-dialog-action-row > .adm-dialog-button.adm-button-danger {
+  color: var(--ui-danger);
+}
+
+/* ---------- 底部动作面板 ---------- */
+
+body .adm-action-sheet-popup > .adm-popup-body {
+  border-radius: 26px 26px 0 0;
+  overflow: hidden;
+}
+
+body .adm-action-sheet-extra {
+  padding: 22px 24px 14px;
+  border-bottom: 0;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--ui-text-2);
+  text-align: center;
+}
+
+body .adm-action-sheet-button-list {
+  border-bottom: 0;
+}
+
+body .adm-action-sheet-button-item-wrapper {
+  border-bottom: 1px solid var(--ui-hairline);
+}
+
+body .adm-action-sheet-button-item {
+  padding: 16px 24px;
+}
+
+body .adm-action-sheet-button-item:active {
+  background: var(--ui-fill);
+}
+
+body .adm-action-sheet-button-item-name {
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 500;
+}
+
+body .adm-action-sheet-button-item-description {
+  padding-top: 4px;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--ui-text-2);
+}
+
+body .adm-action-sheet-cancel {
+  padding-top: 8px;
+  background: var(--ui-fill);
+}
+
+body .adm-action-sheet-cancel .adm-action-sheet-button-item-wrapper {
+  border-bottom: 0;
+}
+
+/* ---------- 轻提示 ---------- */
+
+body .adm-toast-mask .adm-toast-main {
+  max-width: min(300px, 80vw);
+  border-radius: var(--ui-r-md);
+  background: rgba(14, 14, 16, 0.9);
+  font-size: 14px;
+  line-height: 21px;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+body .adm-toast-mask .adm-toast-main-text {
+  padding: 12px 16px;
+}
