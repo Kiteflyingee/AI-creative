@@ -1,13 +1,15 @@
 import { AdVideo } from '@ai-creative/composition';
 import { buildCompositionInput, OUTPUT_FPS, totalFrames } from '@ai-creative/shared';
 import { Player } from '@remotion/player';
-import { Button, Dialog, Input, NoticeBar, Tag, Toast } from 'antd-mobile';
+import { Dialog, Input, SpinLoading, Toast } from 'antd-mobile';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api, showError } from '../api';
-import { AiBadge, ChatBox, Loading, PageHeader, Section } from '../components';
+import { AiBadge, ChatBox, FlowPage, Loading, PageHeader, Section } from '../components';
 import { useProject, useRefreshProject } from '../hooks';
 import type { ClipView, OutputView } from '../types';
+import { IconDownload, IconPlay, IconRefresh, IconShare } from '../ui/icons';
+import { Btn, cx, Notice, Pill } from '../ui/kit';
 
 export function WorkPage() {
   const { projectId = '' } = useParams();
@@ -90,7 +92,7 @@ export function WorkPage() {
         content: (
           <div>
             <Input value={link} readOnly data-testid="share-link" />
-            <p className="hint">打开链接无需登录，页面会标注“AI生成”。</p>
+            <p className="ui-dialog-hint">打开链接无需登录，页面会标注“AI生成”。</p>
           </div>
         ),
         closeOnAction: true,
@@ -127,63 +129,79 @@ export function WorkPage() {
   };
 
   return (
-    <div className="page">
+    <FlowPage>
       <PageHeader title="作品" step={4} back="/?tab=works" />
       {activeJob && (
-        <NoticeBar
-          wrap
-          content="有镜头正在生成，完成后会自动合成新版本"
-          extra={
-            <Button size="mini" onClick={() => navigate(`/p/${projectId}/job/${activeJob.id}`)}>
-              查看进度
-            </Button>
-          }
-        />
+        <div className="ui-notice-wrap">
+          <Notice
+            action={
+              <Btn size="xs" variant="surface" onClick={() => navigate(`/p/${projectId}/job/${activeJob.id}`)}>
+                查看进度
+              </Btn>
+            }
+          >
+            有镜头正在生成，完成后会自动合成新版本
+          </Notice>
+        </div>
       )}
 
       <Section title={current ? `当前版本 v${current.version}` : '还没有成片'} extra={current?.status === 'READY' ? <AiBadge /> : undefined}>
         {current?.status === 'READY' && current.url && (
-          <video className="output-video" src={current.url} poster={current.coverUrl ?? undefined} controls playsInline data-testid="output-video" />
+          <div className="ui-player">
+            <video src={current.url} poster={current.coverUrl ?? undefined} controls playsInline data-testid="output-video" />
+          </div>
         )}
-        {current?.status === 'COMPOSING' && <Loading text="正在合成成片…" />}
+        {current?.status === 'COMPOSING' && (
+          <div className="ui-player ui-player--state">
+            <SpinLoading color="primary" style={{ '--size': '28px' } as React.CSSProperties} />
+            <div className="ui-caption">正在合成成片…</div>
+          </div>
+        )}
         {current?.status === 'FAILED' && (
-          <div>
-            <div className="error-text">{current.errorMessage}</div>
-            <Button size="small" onClick={() => void run('retry', () => api.post(`/app/v1/outputs/${current.id}/retry-compose`))}>
+          <div className="ui-player ui-player--state">
+            <div className="ui-error">{current.errorMessage}</div>
+            <Btn
+              size="sm"
+              variant="surface"
+              icon={<IconRefresh size={15} />}
+              loading={busy === 'retry'}
+              onClick={() => void run('retry', () => api.post(`/app/v1/outputs/${current.id}/retry-compose`))}
+            >
               重试合成
-            </Button>
+            </Btn>
           </div>
         )}
         {current?.status === 'READY' && (
-          <div className="row-gap">
-            <Button size="small" onClick={() => void download(current)}>
+          <div className="ui-work-actions">
+            <Btn size="md" variant="primary" icon={<IconDownload size={17} />} onClick={() => void download(current)}>
               下载
-            </Button>
-            <Button size="small" onClick={() => void share(current)} data-testid="share">
+            </Btn>
+            <Btn size="md" variant="secondary" icon={<IconShare size={17} />} onClick={() => void share(current)} data-testid="share">
               分享
-            </Button>
+            </Btn>
             {current.shareToken && (
-              <Button size="small" fill="none" onClick={() => void run('unshare', () => api.del(`/app/v1/outputs/${current.id}/share`), '已取消分享')}>
+              <Btn size="md" variant="ghost" onClick={() => void run('unshare', () => api.del(`/app/v1/outputs/${current.id}/share`), '已取消分享')}>
                 取消分享
-              </Button>
+              </Btn>
             )}
           </div>
         )}
-        {current?.note && <div className="muted small">本版本：{current.note}</div>}
+        {current?.note && <div className="ui-work-note">本版本：{current.note}</div>}
       </Section>
 
       <Section
         title="字幕"
+        desc="改字幕只重新合成，不重新生成视频。"
         extra={
           previewInput ? (
-            <Button size="small" fill="none" onClick={() => setPreview(!preview)} data-testid="caption-preview">
+            <Btn size="sm" variant="secondary" icon={<IconPlay size={13} />} onClick={() => setPreview(!preview)} data-testid="caption-preview">
               {preview ? '收起预览' : '实时预览'}
-            </Button>
+            </Btn>
           ) : undefined
         }
       >
         {preview && previewInput && (
-          <div className="player-box" data-testid="caption-player">
+          <div className="ui-player-box" data-testid="caption-player">
             <Player
               component={AdVideo}
               inputProps={previewInput}
@@ -197,9 +215,10 @@ export function WorkPage() {
           </div>
         )}
         {spec.shots.map((s, i) => (
-          <div key={s.shotId} className="caption-row">
-            <span className="caption-label">镜头 {i + 1}</span>
+          <div key={s.shotId} className="ui-caption-row">
+            <span className="ui-caption-row__label">镜头 {i + 1}</span>
             <Input
+              className="ui-input"
               value={captions[s.shotId] ?? ''}
               onChange={(v) => setCaptions({ ...captions, [s.shotId]: v })}
               maxLength={40}
@@ -208,77 +227,99 @@ export function WorkPage() {
             />
           </div>
         ))}
-        <Button size="small" color="primary" disabled={!captionsChanged || !base} loading={busy === 'captions'} onClick={() => void saveCaptions()} data-testid="save-captions">
+        <Btn
+          block
+          variant="primary"
+          className="ui-mt"
+          disabled={!captionsChanged || !base}
+          loading={busy === 'captions'}
+          onClick={() => void saveCaptions()}
+          data-testid="save-captions"
+        >
           保存字幕并重新合成
-        </Button>
-        <p className="hint">改字幕只重新合成，不重新生成视频。</p>
+        </Btn>
       </Section>
 
-      <Section title="镜头">
+      <Section
+        title="镜头"
+        extra={
+          <Btn size="sm" variant="ghost" onClick={() => navigate(`/p/${projectId}/storyboard`)}>
+            修改故事板
+          </Btn>
+        }
+      >
         {spec.shots.map((s, i) => {
           const versions = clipsOf(s.shotId);
           const using = selectedClip(s.shotId);
           return (
-            <div key={s.shotId} className="shot-card" data-testid="work-shot">
-              <div className="shot-head">
-                <b>镜头 {i + 1}</b>
-                <Tag>{s.durationSec} 秒</Tag>
-                {using && <Tag color="success">使用版本 {using.version}</Tag>}
+            <article key={s.shotId} className="ui-shot" data-testid="work-shot">
+              <div className="ui-shot__head">
+                <span className="ui-shot__no">镜头 {i + 1}</span>
+                <Pill>{s.durationSec} 秒</Pill>
+                {using && <Pill tone="success">使用版本 {using.version}</Pill>}
               </div>
-              <div className="shot-field">{s.action || s.subject}</div>
-              <div className="version-row">
-                {versions.map((c) => (
-                  <div key={c.id} className={`version ${using?.id === c.id ? 'using' : ''}`} data-testid={`version-${i}-${c.version}`}>
-                    {compare === c.id && c.url ? (
-                      <video src={c.url} controls autoPlay playsInline className="version-video" />
-                    ) : (
-                      <Button size="mini" onClick={() => setCompare(c.id)}>
-                        播放 v{c.version}
-                      </Button>
-                    )}
-                    {using?.id !== c.id && (
-                      <Button
-                        size="mini"
-                        color="primary"
-                        fill="outline"
-                        loading={busy === c.id}
-                        onClick={() => void run(c.id, () => api.post(`/app/v1/projects/${projectId}/shots/${s.shotId}/select-clip`, { clipId: c.id }), '正在用这个版本重新合成')}
-                        data-testid={`use-version-${i}-${c.version}`}
-                      >
-                        使用 v{c.version}
-                      </Button>
-                    )}
-                  </div>
-                ))}
+              <div className="ui-shot__fields">
+                <div>{s.action || s.subject}</div>
               </div>
-              <Button size="small" onClick={() => navigate(`/p/${projectId}/confirm?shots=${s.shotId}`)} data-testid={`reshoot-${i}`}>
-                重新生成这个镜头
-              </Button>
-            </div>
+              {versions.length > 0 && (
+                <div className="ui-versions">
+                  {versions.map((c) => (
+                    <div key={c.id} className={cx('ui-version', using?.id === c.id && 'is-using')} data-testid={`version-${i}-${c.version}`}>
+                      {compare === c.id && c.url ? (
+                        <video src={c.url} controls autoPlay playsInline className="ui-version__video" />
+                      ) : (
+                        <Btn size="xs" variant="secondary" icon={<IconPlay size={11} />} onClick={() => setCompare(c.id)}>
+                          播放 v{c.version}
+                        </Btn>
+                      )}
+                      {using?.id === c.id ? (
+                        <span className="ui-version__label">正在使用</span>
+                      ) : (
+                        <Btn
+                          size="xs"
+                          variant="primary"
+                          loading={busy === c.id}
+                          onClick={() => void run(c.id, () => api.post(`/app/v1/projects/${projectId}/shots/${s.shotId}/select-clip`, { clipId: c.id }), '正在用这个版本重新合成')}
+                          data-testid={`use-version-${i}-${c.version}`}
+                        >
+                          使用 v{c.version}
+                        </Btn>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="ui-shot__actions">
+                <Btn size="sm" variant="surface" icon={<IconRefresh size={15} />} onClick={() => navigate(`/p/${projectId}/confirm?shots=${s.shotId}`)} data-testid={`reshoot-${i}`}>
+                  重新生成这个镜头
+                </Btn>
+              </div>
+            </article>
           );
         })}
-        <Button size="small" fill="none" onClick={() => navigate(`/p/${projectId}/storyboard`)}>
-          修改故事板
-        </Button>
       </Section>
 
       <Section title="版本记录">
-        {view.outputs.map((o) => (
-          <div key={o.id} className="output-row" data-testid="output-row">
-            <span>
-              v{o.version} · {o.note || '成片'}
-            </span>
-            <Tag color={o.status === 'READY' ? 'success' : o.status === 'FAILED' ? 'danger' : 'default'}>
-              {o.status === 'READY' ? '可用' : o.status === 'FAILED' ? '失败' : '合成中'}
-            </Tag>
-            {o.status === 'READY' && o.id !== view.project.currentOutputId && (
-              <Button size="mini" onClick={() => void run(o.id, () => api.post(`/app/v1/outputs/${o.id}/make-current`), '已切换')}>
-                设为当前
-              </Button>
-            )}
-            {o.id === view.project.currentOutputId && <Tag color="primary">当前</Tag>}
-          </div>
-        ))}
+        <div className="ui-list">
+          {view.outputs.map((o) => (
+            <div key={o.id} className="ui-list__row" data-testid="output-row">
+              <span className="ui-list__main">
+                v{o.version} · {o.note || '成片'}
+              </span>
+              <span className="ui-list__side">
+                <Pill tone={o.status === 'READY' ? 'success' : o.status === 'FAILED' ? 'danger' : 'neutral'}>
+                  {o.status === 'READY' ? '可用' : o.status === 'FAILED' ? '失败' : '合成中'}
+                </Pill>
+                {o.id === view.project.currentOutputId && <Pill tone="ink">当前</Pill>}
+                {o.status === 'READY' && o.id !== view.project.currentOutputId && (
+                  <Btn size="xs" variant="surface" loading={busy === o.id} onClick={() => void run(o.id, () => api.post(`/app/v1/outputs/${o.id}/make-current`), '已切换')}>
+                    设为当前
+                  </Btn>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
       </Section>
 
       <ChatBox
@@ -289,6 +330,6 @@ export function WorkPage() {
           if (r.navigate?.page === 'confirm') navigate(`/p/${projectId}/confirm?shots=${(r.navigate.shotIds ?? []).join(',')}`);
         }}
       />
-    </div>
+    </FlowPage>
   );
 }

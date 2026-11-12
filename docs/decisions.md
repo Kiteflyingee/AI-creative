@@ -71,6 +71,7 @@
 | D-42 | 本地 MinIO 使用 `bitnamilegacy/minio` 镜像（Docker Hub 上的 `minio/minio` 已无法拉取，quay.io 无法访问） | 本机实际情况 | 实现过程 |
 | D-43 | 后台任务有两种运行方式：`JOB_QUEUE_MODE=bullmq`（服务运行，Redis 队列）与 `inline`（命令行脚本、自动化测试在进程内执行） | 命令行冒烟脚本与测试不依赖 Redis | 实现过程 |
 | D-44 | H5 端到端测试使用测试代码里的假模型供应商 + 真实 Remotion 合成（`apps/server/test/e2e-server.ts`，只给 Playwright 使用） | 符合 D-31：用户看不到，不产生费用 | 实现过程 |
+| D-52 | H5 采用统一的移动端设计规范（`.kiro/steering/mobile-ui.md`，样式与组件在 `apps/h5/src/ui/`）：黑白灰界面、作品大图为视觉焦点、浅灰卡片代替白卡片和描边；首页用悬浮黑色导航（创作 · 新建 · 作品，“我的”从头像进入），流程页用方形返回按钮 + 五段进度 + 悬浮底部操作栏。所有页面已迁移（2026-11-12）；antd-mobile 只保留输入框、对话框、弹层、动作面板、轻提示，外观在 `theme.css` 统一 | 用户要求提升为成熟的 To C 创作产品风格，并且各页面一致；参考 Dribbble「AI Video Generator & Creative Studio Mobile App」的设计语言 | 规划对话 2026-11-11、11-12 |
 | D-22 | 延续 v0.1 边界：不做公开 API/SDK/开发者平台；不编造商品属性、功效、GMV 或测试结果；素材需要所有权或授权；模型密钥只放在服务端 | v0.1 强约束 | v0.1 原文 |
 
 ## 3. v0.2 决策的去向

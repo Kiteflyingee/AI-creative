@@ -1,47 +1,76 @@
-import { Button, Dialog, Empty, NavBar, Popup, SpinLoading, Steps, Tag, TextArea, Toast } from 'antd-mobile';
+import { Dialog, SpinLoading, TextArea, Toast } from 'antd-mobile';
 import { useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, showError } from './api';
 import type { AssetKind, AssetView, ChatProposal } from './types';
+import { IconBack, IconPlus, IconSparkle } from './ui/icons';
+import { Btn, cx, IconButton, Sheet } from './ui/kit';
 
 const STEPS = ['商品素材', '故事线', '故事板', '生成', '作品'];
 
-export function PageHeader({ title, step, back = '/' }: { title: string; step?: number; back?: string }) {
+/** 流程页顶栏：返回按钮 + 标题 + 五步进度（规范见 .kiro/steering/mobile-ui.md） */
+export function PageHeader({ title, step, back = '/', extra }: { title: string; step?: number; back?: string; extra?: ReactNode }) {
   const navigate = useNavigate();
   return (
-    <div className="page-header">
-      <NavBar onBack={() => navigate(back)}>{title}</NavBar>
-      {step !== undefined && (
-        <Steps current={step} style={{ '--title-font-size': '11px', '--icon-size': '16px' } as React.CSSProperties}>
-          {STEPS.map((s) => (
-            <Steps.Step key={s} title={s} />
-          ))}
-        </Steps>
-      )}
-    </div>
-  );
-}
-
-export function Loading({ text = '加载中' }: { text?: string }) {
-  return (
-    <div className="center-box">
-      <SpinLoading color="primary" />
-      <div className="muted">{text}</div>
-    </div>
-  );
-}
-
-export function BottomBar({ children }: { children: ReactNode }) {
-  return <div className="bottom-bar">{children}</div>;
-}
-
-export function Section({ title, extra, children }: { title: string; extra?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="section">
-      <div className="section-title">
-        <span>{title}</span>
+    <header className="ui-header">
+      <div className="ui-header__row">
+        <IconButton label="返回" onClick={() => navigate(back)}>
+          <IconBack size={22} />
+        </IconButton>
+        <h1 className="ui-header__title">{title}</h1>
         {extra}
       </div>
+      {step !== undefined && (
+        <ol className="ui-steps-bar" aria-label={`第 ${step + 1} 步，共 ${STEPS.length} 步`}>
+          {STEPS.map((s, i) => (
+            <li key={s} className={cx(i < step && 'is-done', i === step && 'is-current')} aria-current={i === step ? 'step' : undefined}>
+              <span className="ui-steps-bar__line" />
+              <span className="ui-steps-bar__name">{s}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </header>
+  );
+}
+
+/** 流程页骨架：有底部操作栏时传 bar，自动留出底部空间 */
+export function FlowPage({ bar = false, children }: { bar?: boolean; children: ReactNode }) {
+  return <div className={cx('ui-page', 'ui-page--flow', bar && 'has-bar')}>{children}</div>;
+}
+
+export function Loading({ text = '加载中', inline = false }: { text?: string; inline?: boolean }) {
+  return (
+    <div className={cx('ui-loading', inline && 'ui-loading--inline')}>
+      <SpinLoading color="primary" style={{ '--size': '28px' } as React.CSSProperties} />
+      <div>{text}</div>
+    </div>
+  );
+}
+
+/** 底部操作栏：悬浮在页面底部，内容滚到这里会淡出 */
+export function BottomBar({ children }: { children: ReactNode }) {
+  return <div className="ui-actionbar">{children}</div>;
+}
+
+export function Section({
+  title,
+  desc,
+  extra,
+  children,
+}: {
+  title: ReactNode;
+  desc?: ReactNode;
+  extra?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="ui-block">
+      <div className="ui-block__head">
+        <h2 className="ui-block__title">{title}</h2>
+        {extra && <div className="ui-block__extra">{extra}</div>}
+      </div>
+      {desc && <p className="ui-block__desc">{desc}</p>}
       {children}
     </section>
   );
@@ -49,31 +78,39 @@ export function Section({ title, extra, children }: { title: string; extra?: Rea
 
 export function AiBadge() {
   return (
-    <Tag color="primary" fill="outline" className="ai-badge">
+    <span className="ui-ai-badge">
+      <IconSparkle size={10} />
       AI生成
-    </Tag>
+    </span>
   );
 }
 
-export function EmptyHint({ text }: { text: string }) {
-  return <Empty description={text} />;
+export function EmptyHint({ text, children }: { text: string; children?: ReactNode }) {
+  return (
+    <div className="ui-empty">
+      <div className="ui-caption">{text}</div>
+      {children}
+    </div>
+  );
 }
 
-/** 选择本地图片并上传；失败时显示服务端给出的原因（如尺寸不符合要求） */
+/** 选择本地图片并上传；失败时显示服务端给出的原因（如尺寸不符合要求）。tile 为图片网格里的“添加”块 */
 export function UploadButton({
   projectId,
   kind,
   text,
   onUploaded,
   multiple = true,
-  size = 'small',
+  size = 'sm',
+  variant = 'button',
 }: {
   projectId: string;
   kind: AssetKind;
   text: string;
   onUploaded: (assets: AssetView[]) => void;
   multiple?: boolean;
-  size?: 'mini' | 'small';
+  size?: 'xs' | 'sm';
+  variant?: 'button' | 'tile';
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -106,24 +143,34 @@ export function UploadButton({
         data-testid={`upload-${kind}`}
         onChange={(e) => void upload(e.target.files)}
       />
-      <Button size={size} loading={busy} onClick={() => input.current?.click()}>
-        {text}
-      </Button>
+      {variant === 'tile' ? (
+        <button type="button" className="ui-tile ui-tile--add" disabled={busy} onClick={() => input.current?.click()}>
+          <span className="ui-tile__media">
+            <span className="ui-tile__plus">{busy ? <span className="ui-spinner" /> : <IconPlus size={18} />}</span>
+            {busy ? '上传中' : text}
+          </span>
+        </button>
+      ) : (
+        <Btn size={size} variant="secondary" loading={busy} onClick={() => input.current?.click()}>
+          {text}
+        </Btn>
+      )}
     </>
   );
 }
 
+/** 图片块的画面部分（ui-tile__media 内部） */
 export function AssetImage({ asset, onClick }: { asset: AssetView | undefined; onClick?: () => void }) {
-  if (!asset) return <div className="asset-img placeholder">无图片</div>;
+  if (!asset) return <span className="ui-tile__state">无图片</span>;
   if (asset.status === 'GENERATING')
     return (
-      <div className="asset-img placeholder">
-        <SpinLoading style={{ '--size': '20px' } as React.CSSProperties} />
+      <span className="ui-tile__state">
+        <SpinLoading color="primary" style={{ '--size': '20px' } as React.CSSProperties} />
         <span>AI 生成中</span>
-      </div>
+      </span>
     );
-  if (asset.status === 'FAILED') return <div className="asset-img placeholder error">生成失败</div>;
-  return <img className="asset-img" src={asset.url ?? undefined} alt={asset.label} onClick={onClick} />;
+  if (asset.status === 'FAILED') return <span className="ui-tile__state is-error">生成失败</span>;
+  return <img src={asset.url ?? undefined} alt={asset.label} onClick={onClick} />;
 }
 
 const PAGE_HINT: Record<string, string> = {
@@ -190,41 +237,62 @@ export function ChatBox({
   };
 
   return (
-    <div className="chat-box">
-      <div className="chat-title">对话修改</div>
-      <TextArea
-        placeholder={PAGE_HINT[page]}
-        value={message}
-        onChange={setMessage}
-        autoSize={{ minRows: 2, maxRows: 4 }}
-        maxLength={500}
-        data-testid="chat-input"
-      />
-      <Button size="small" color="primary" fill="outline" loading={busy} onClick={() => void send()} data-testid="chat-send">
-        让 AI 修改
-      </Button>
-      <Popup visible={Boolean(proposal)} onMaskClick={() => void discard()} bodyStyle={{ borderRadius: '12px 12px 0 0', maxHeight: '75vh', overflow: 'auto' }}>
+    <section className="ui-block">
+      <div className="ui-prompt">
+        <div className="ui-prompt__label">
+          <IconSparkle size={13} />
+          用一句话修改
+        </div>
+        <TextArea
+          placeholder={PAGE_HINT[page]}
+          value={message}
+          onChange={setMessage}
+          autoSize={{ minRows: 2, maxRows: 5 }}
+          maxLength={500}
+          data-testid="chat-input"
+        />
+        <div className="ui-prompt__foot">
+          <span className="ui-prompt__note">AI 先给出修改对比，你确认后才生效</span>
+          <IconButton
+            label="让 AI 修改"
+            tone="ink"
+            className="ui-prompt__send"
+            disabled={busy || !message.trim()}
+            onClick={() => void send()}
+            data-testid="chat-send"
+          >
+            {busy ? <span className="ui-spinner" /> : <IconSparkle size={20} />}
+          </IconButton>
+        </div>
+      </div>
+      <Sheet
+        visible={Boolean(proposal)}
+        onClose={() => void discard()}
+        testId="chat-proposal"
+        footer={
+          <>
+            <Btn block size="lg" variant="secondary" onClick={() => void discard()}>
+              不改了
+            </Btn>
+            <Btn block size="lg" variant="primary" loading={applying} onClick={() => void apply()} data-testid="chat-apply">
+              应用
+            </Btn>
+          </>
+        }
+      >
         {proposal && (
-          <div className="proposal" data-testid="chat-proposal">
-            <div className="proposal-reply">{proposal.reply}</div>
+          <>
+            <div className="ui-sheet-reply">{proposal.reply}</div>
             {proposal.changes.map((c, i) => (
-              <div key={i} className="change">
-                <div className="change-title">{c.title}</div>
-                {c.before !== undefined && <div className="change-before">原：{c.before || '（空）'}</div>}
-                {c.after !== undefined && <div className="change-after">改为：{c.after || '（空）'}</div>}
+              <div key={i} className="ui-diff">
+                <div className="ui-diff__title">{c.title}</div>
+                {c.before !== undefined && <div className="ui-diff__before">原：{c.before || '（空）'}</div>}
+                {c.after !== undefined && <div className="ui-diff__after">改为：{c.after || '（空）'}</div>}
               </div>
             ))}
-            <div className="row-gap">
-              <Button block onClick={() => void discard()}>
-                不改了
-              </Button>
-              <Button block color="primary" loading={applying} onClick={() => void apply()} data-testid="chat-apply">
-                应用
-              </Button>
-            </div>
-          </div>
+          </>
         )}
-      </Popup>
-    </div>
+      </Sheet>
+    </section>
   );
 }

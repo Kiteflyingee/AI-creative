@@ -10,13 +10,15 @@ import {
   type Shot,
   type StoryboardSpec,
 } from '@ai-creative/shared';
-import { Button, Dialog, Form, Popup, Selector, Tag, TextArea, Toast } from 'antd-mobile';
+import { Dialog, TextArea, Toast } from 'antd-mobile';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api, showError } from '../api';
-import { AssetImage, BottomBar, ChatBox, Loading, PageHeader, Section, UploadButton } from '../components';
+import { AssetImage, BottomBar, ChatBox, EmptyHint, FlowPage, Loading, PageHeader, Section, UploadButton } from '../components';
 import { useProject, useRefreshProject } from '../hooks';
 import type { AssetKind, ProjectView } from '../types';
+import { IconArrowDown, IconArrowUp, IconClock, IconPlus, IconSparkle, IconTrash } from '../ui/icons';
+import { Btn, ChoiceGroup, Field, IconButton, Pill, Sheet } from '../ui/kit';
 
 const KIND_TO_ASSET: Record<Reference['kind'], AssetKind> = { product: 'PRODUCT', character: 'CHARACTER', scene: 'SCENE' };
 
@@ -59,26 +61,28 @@ function ReferenceCard({ reference: r, view, projectId, onChanged }: { reference
   const faceProblem = asset?.origin === 'UPLOAD' && asset.face === 'DETECTED' && asset.faceResolution === 'NONE';
   const replacement = asset?.replacementAssetId ? view.assets.find((a) => a.id === asset.replacementAssetId) : undefined;
   return (
-    <div className="ref-card" data-testid={`ref-${r.kind}`}>
-      <AssetImage asset={replacement ?? asset} />
-      <div className="ref-name">{r.name}</div>
+    <div className="ui-tile ui-ref" data-testid={`ref-${r.kind}`}>
+      <div className="ui-tile__media">
+        <AssetImage asset={replacement ?? asset} />
+      </div>
+      <div className="ui-ref__name">{r.name}</div>
       {r.originalAssetId && (
-        <Tag color={asset?.comparison?.consistent === 'pass' ? 'success' : 'warning'} fill="outline">
-          AI 修改过，请核对外观
-        </Tag>
+        <div className="ui-tile__meta">
+          <Pill tone={asset?.comparison?.consistent === 'pass' ? 'success' : 'warning'}>AI 修改过，请核对外观</Pill>
+        </div>
       )}
-      {asset?.comparison && asset.comparison.consistent !== 'pass' && <div className="asset-issues">{asset.comparison.issues.join('；')}</div>}
-      {faceProblem && <div className="face-warning">有真人脸，请在商品素材页处理</div>}
-      {!asset && <div className="muted small">无图片，只用文字描述</div>}
-      <div className="ref-actions">
-        <Button size="mini" loading={busy} onClick={() => void regenerate()} data-testid="ref-regenerate">
+      {asset?.comparison && asset.comparison.consistent !== 'pass' && <div className="ui-tile__note is-warn">{asset.comparison.issues.join('；')}</div>}
+      {faceProblem && <div className="ui-tile__note is-danger">有真人脸，请在商品素材页处理</div>}
+      {!asset && <div className="ui-tile__note">无图片，只用文字描述</div>}
+      <div className="ui-ref__actions">
+        <Btn size="xs" variant="secondary" icon={<IconSparkle size={12} />} loading={busy} onClick={() => void regenerate()} data-testid="ref-regenerate">
           AI 重新生成
-        </Button>
-        <UploadButton projectId={projectId} kind={KIND_TO_ASSET[r.kind]} text="换成我的图" size="mini" multiple={false} onUploaded={(a) => void replace(a[0]!.id)} />
+        </Btn>
+        <UploadButton projectId={projectId} kind={KIND_TO_ASSET[r.kind]} text="换成我的图" size="xs" multiple={false} onUploaded={(a) => void replace(a[0]!.id)} />
         {r.originalAssetId && (
-          <Button size="mini" fill="none" onClick={() => void replace('original')}>
+          <Btn size="xs" variant="ghost" onClick={() => void replace('original')}>
             换回原图
-          </Button>
+          </Btn>
         )}
       </div>
     </div>
@@ -102,50 +106,61 @@ function ShotEditor({
   const durations = allowedValues(rule);
   const narrationLen = draft.narration.length;
   return (
-    <Popup visible onMaskClick={onClose} bodyStyle={{ borderRadius: '12px 12px 0 0', maxHeight: '85vh', overflow: 'auto' }}>
-      <div className="popup-body">
-        <Form layout="vertical">
-          <Form.Item label={`时长（${rule.allowed?.length ? durations.join('、') : `${rule.min}–${rule.max}`} 秒）`}>
-            <Selector
-              columns={6}
-              options={durations.filter((d) => d <= 15 || d === draft.durationSec).map((d) => ({ label: `${d}s`, value: d }))}
-              value={[draft.durationSec]}
-              onChange={(v) => v[0] && setDraft({ ...draft, durationSec: v[0] })}
-            />
-          </Form.Item>
-          {SHOT_EDITABLE_FIELDS.map((field) => (
-            <Form.Item
-              key={field}
-              label={SHOT_FIELD_LABELS[field]}
-              help={
-                field === 'narration'
-                  ? narrationLen > NARRATION_HARD_LIMIT
-                    ? `已 ${narrationLen} 字，超过 ${NARRATION_HARD_LIMIT} 字模型很难说完`
-                    : narrationLen > NARRATION_SOFT_LIMIT
-                      ? `已 ${narrationLen} 字，${NARRATION_SOFT_LIMIT} 字以内最稳定`
-                      : `${NARRATION_SOFT_LIMIT} 字以内最稳定`
-                  : field === 'caption'
-                    ? '合成时叠加在画面下方，之后还能改'
-                    : undefined
-              }
-            >
-              <TextArea value={draft[field]} onChange={(v) => setDraft({ ...draft, [field]: v })} autoSize maxLength={field === 'caption' ? 40 : 300} />
-            </Form.Item>
-          ))}
-          <Form.Item label="参考图">
-            <Selector
-              multiple
-              options={spec.references.map((r) => ({ label: `${REFERENCE_KIND_LABELS[r.kind]}·${r.name}`, value: r.refId }))}
-              value={draft.refIds}
-              onChange={(v) => setDraft({ ...draft, refIds: v.slice(0, 6) })}
-            />
-          </Form.Item>
-        </Form>
-        <Button block color="primary" disabled={narrationLen > NARRATION_HARD_LIMIT} onClick={() => onSave(draft)}>
+    <Sheet
+      visible
+      onClose={onClose}
+      title={spec.shots.some((s) => s.shotId === shot.shotId) ? '编辑镜头' : '新增镜头'}
+      footer={
+        <Btn block size="lg" variant="primary" disabled={narrationLen > NARRATION_HARD_LIMIT} onClick={() => onSave(draft)}>
           保存镜头
-        </Button>
-      </div>
-    </Popup>
+        </Btn>
+      }
+    >
+      <Field label={`时长（${rule.allowed?.length ? durations.join('、') : `${rule.min}–${rule.max}`} 秒）`}>
+        <ChoiceGroup
+          label="镜头时长"
+          size="sm"
+          options={durations.filter((d) => d <= 15 || d === draft.durationSec).map((d) => ({ label: `${d}s`, value: d }))}
+          value={[draft.durationSec]}
+          onChange={(v) => v[0] && setDraft({ ...draft, durationSec: v[0] })}
+        />
+      </Field>
+      {SHOT_EDITABLE_FIELDS.map((field) => (
+        <Field
+          key={field}
+          label={SHOT_FIELD_LABELS[field]}
+          hint={
+            field === 'narration'
+              ? narrationLen > NARRATION_HARD_LIMIT
+                ? `已 ${narrationLen} 字，超过 ${NARRATION_HARD_LIMIT} 字模型很难说完`
+                : narrationLen > NARRATION_SOFT_LIMIT
+                  ? `已 ${narrationLen} 字，${NARRATION_SOFT_LIMIT} 字以内最稳定`
+                  : `${NARRATION_SOFT_LIMIT} 字以内最稳定`
+              : field === 'caption'
+                ? '合成时叠加在画面下方，之后还能改'
+                : undefined
+          }
+        >
+          <TextArea
+            className="ui-input"
+            value={draft[field]}
+            onChange={(v) => setDraft({ ...draft, [field]: v })}
+            autoSize={{ minRows: 1, maxRows: 6 }}
+            maxLength={field === 'caption' ? 40 : 300}
+          />
+        </Field>
+      ))}
+      <Field label="参考图" hint="最多 6 张">
+        <ChoiceGroup
+          label="参考图"
+          size="sm"
+          multiple
+          options={spec.references.map((r) => ({ label: `${REFERENCE_KIND_LABELS[r.kind]}·${r.name}`, value: r.refId }))}
+          value={draft.refIds}
+          onChange={(v) => setDraft({ ...draft, refIds: v.slice(0, 6) })}
+        />
+      </Field>
+    </Sheet>
   );
 }
 
@@ -161,10 +176,16 @@ export function StoryboardPage() {
   const board = view.storyboard;
   if (!board) {
     return (
-      <div className="page">
+      <FlowPage>
         <PageHeader title="故事板" step={2} back={`/p/${projectId}/storylines`} />
-        <div className="center-box">还没有故事板，请先选择一条故事线</div>
-      </div>
+        <section className="ui-block">
+          <EmptyHint text="还没有故事板，请先选择一条故事线">
+            <Btn variant="primary" onClick={() => navigate(`/p/${projectId}/storylines`)}>
+              去选故事线
+            </Btn>
+          </EmptyHint>
+        </section>
+      </FlowPage>
     );
   }
   const spec = board.spec;
@@ -236,26 +257,34 @@ export function StoryboardPage() {
   const clipsOf = (shotId: string) => view.clips.filter((c) => c.shotId === shotId && c.status === 'SUCCEEDED');
 
   return (
-    <div className="page">
+    <FlowPage bar>
       <PageHeader title="故事板" step={2} back={`/p/${projectId}/storylines`} />
-      <Section title={`总时长 ${spec.durationSec} 秒 · ${spec.shots.length} 个镜头`}>
-        <Selector
-          options={STORY_DURATIONS.map((d) => ({ label: `${d} 秒`, value: d }))}
+
+      <section className="ui-block">
+        <div className="ui-summary">
+          <span className="ui-summary__big">{spec.durationSec} 秒</span>
+          <span className="ui-summary__small">{spec.shots.length} 个镜头</span>
+        </div>
+        <p className="ui-block__desc ui-summary__desc">
+          风格：{spec.styleProfile || '—'} · 音色：{spec.voiceProfile || '—'}
+        </p>
+        <ChoiceGroup
+          label="成片总时长"
+          options={STORY_DURATIONS.map((d) => ({ label: `${d} 秒`, value: d, icon: <IconClock size={18} /> }))}
           value={STORY_DURATIONS.includes(spec.durationSec as 15) ? [spec.durationSec as 15] : []}
           onChange={(v) => v[0] && v[0] !== spec.durationSec && void setTotal(v[0])}
           disabled={busy}
         />
-        <div className="muted small">风格：{spec.styleProfile || '—'} · 音色：{spec.voiceProfile || '—'}</div>
-      </Section>
+      </section>
 
-      <Section title="参考图（先锁定主体，再让画面动起来）">
+      <Section title="参考图" desc="先锁定主体，再让画面动起来">
         {(['product', 'character', 'scene'] as const).map((kind) => {
           const refs = spec.references.filter((r) => r.kind === kind);
           if (!refs.length) return null;
           return (
             <div key={kind}>
-              <div className="sub-title">{REFERENCE_KIND_LABELS[kind]}</div>
-              <div className="ref-row">
+              <div className="ui-sub-title">{REFERENCE_KIND_LABELS[kind]}</div>
+              <div className="ui-hrail">
                 {refs.map((r) => (
                   <ReferenceCard key={r.refId} reference={r} view={view} projectId={projectId} onChanged={() => void refresh()} />
                 ))}
@@ -265,44 +294,71 @@ export function StoryboardPage() {
         })}
       </Section>
 
-      <Section title="分镜" extra={<Button size="small" onClick={add}>新增镜头</Button>}>
+      <Section
+        title="分镜"
+        extra={
+          <Btn size="sm" variant="secondary" icon={<IconPlus size={14} />} onClick={add}>
+            新增镜头
+          </Btn>
+        }
+      >
         {spec.shots.map((shot, i) => (
-          <div key={shot.shotId} className="shot-card" data-testid="shot-card">
-            <div className="shot-head">
-              <b>镜头 {i + 1}</b>
-              <Tag>{shot.durationSec} 秒</Tag>
-              {shot.purpose && <Tag fill="outline">{shot.purpose}</Tag>}
-              {clipsOf(shot.shotId).length > 0 && <Tag color="success">已生成 {clipsOf(shot.shotId).length} 版</Tag>}
+          <article key={shot.shotId} className="ui-shot" data-testid="shot-card">
+            <div className="ui-shot__head">
+              <span className="ui-shot__no">镜头 {i + 1}</span>
+              <Pill>{shot.durationSec} 秒</Pill>
+              {shot.purpose && <Pill>{shot.purpose}</Pill>}
+              {clipsOf(shot.shotId).length > 0 && <Pill tone="success">已生成 {clipsOf(shot.shotId).length} 版</Pill>}
             </div>
-            <div className="shot-field">画面：{[shot.subject, shot.action, shot.scene].filter(Boolean).join('；') || '—'}</div>
-            <div className="shot-field">运镜：{shot.camera || '—'}</div>
-            <div className="shot-field">
-              口播：{shot.narration || '无'}
-              {shot.narration.length > NARRATION_SOFT_LIMIT && <Tag color="warning">口播偏长</Tag>}
+            <div className="ui-shot__fields">
+              <div>
+                <span className="k">画面：</span>
+                {[shot.subject, shot.action, shot.scene].filter(Boolean).join('；') || '—'}
+              </div>
+              <div>
+                <span className="k">运镜：</span>
+                {shot.camera || '—'}
+              </div>
+              <div>
+                <span className="k">口播：</span>
+                {shot.narration || '无'}
+                {shot.narration.length > NARRATION_SOFT_LIMIT && (
+                  <>
+                    {' '}
+                    <Pill tone="warning">口播偏长</Pill>
+                  </>
+                )}
+              </div>
+              <div>
+                <span className="k">字幕：</span>
+                {shot.caption || '无'}
+              </div>
             </div>
-            <div className="shot-field">字幕：{shot.caption || '无'}</div>
-            <div className="shot-refs">
-              {refsOf(shot).map((r) => (
-                <Tag key={r.refId} fill="outline">
-                  {REFERENCE_KIND_LABELS[r.kind]}·{r.name}
-                </Tag>
-              ))}
-            </div>
-            <div className="row-gap">
-              <Button size="mini" onClick={() => setEditing(shot)} data-testid="edit-shot">
+            {refsOf(shot).length > 0 && (
+              <div className="ui-shot__refs">
+                {refsOf(shot).map((r) => (
+                  <Pill key={r.refId}>
+                    {REFERENCE_KIND_LABELS[r.kind]}·{r.name}
+                  </Pill>
+                ))}
+              </div>
+            )}
+            <div className="ui-shot__actions">
+              <Btn size="sm" variant="surface" onClick={() => setEditing(shot)} data-testid="edit-shot">
                 编辑
-              </Button>
-              <Button size="mini" disabled={i === 0 || busy} onClick={() => move(i, -1)}>
-                上移
-              </Button>
-              <Button size="mini" disabled={i === spec.shots.length - 1 || busy} onClick={() => move(i, 1)}>
-                下移
-              </Button>
-              <Button size="mini" fill="none" disabled={busy} onClick={() => void remove(i)}>
-                删除
-              </Button>
+              </Btn>
+              <span className="ui-spacer" />
+              <IconButton label="上移" size="sm" tone="surface" disabled={i === 0 || busy} onClick={() => move(i, -1)}>
+                <IconArrowUp size={17} />
+              </IconButton>
+              <IconButton label="下移" size="sm" tone="surface" disabled={i === spec.shots.length - 1 || busy} onClick={() => move(i, 1)}>
+                <IconArrowDown size={17} />
+              </IconButton>
+              <IconButton label="删除" size="sm" tone="surface" disabled={busy} onClick={() => void remove(i)}>
+                <IconTrash size={17} />
+              </IconButton>
             </div>
-          </div>
+          </article>
         ))}
       </Section>
 
@@ -316,12 +372,20 @@ export function StoryboardPage() {
       />
 
       <BottomBar>
-        <Button block color="primary" size="large" disabled={busy} onClick={() => navigate(`/p/${projectId}/confirm`)} data-testid="to-confirm">
+        <Btn
+          block
+          size="lg"
+          variant="primary"
+          icon={<IconSparkle size={16} />}
+          disabled={busy}
+          onClick={() => navigate(`/p/${projectId}/confirm`)}
+          data-testid="to-confirm"
+        >
           去生成视频
-        </Button>
+        </Btn>
       </BottomBar>
 
       {editing && <ShotEditor shot={editing} spec={spec} rule={view.model.duration} onClose={() => setEditing(null)} onSave={(s) => void saveEditing(s)} />}
-    </div>
+    </FlowPage>
   );
 }

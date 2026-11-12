@@ -27,3 +27,6 @@ apps/h5/e2e/screenshots/
 .vscode/
 *.log
 apps/h5/e2e/review/
+
+# 第三方设计参考图（版权属于原作者，只在本地参考）
+design-references/

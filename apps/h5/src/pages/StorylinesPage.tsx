@@ -1,15 +1,17 @@
 import { STORY_DURATIONS, STORY_TYPES } from '@ai-creative/shared';
-import { Button, Dialog, Form, Input, Popup, Selector, Tag, TextArea } from 'antd-mobile';
+import { Dialog, Input, TextArea } from 'antd-mobile';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api, showError } from '../api';
-import { BottomBar, ChatBox, EmptyHint, Loading, PageHeader } from '../components';
+import { BottomBar, ChatBox, EmptyHint, FlowPage, Loading, PageHeader, Section } from '../components';
 import { useProject, useRefreshProject } from '../hooks';
 import type { ProjectView, StorylineContent } from '../types';
+import { IconClock, IconRefresh } from '../ui/icons';
+import { Btn, ChoiceGroup, cx, Field, Pill, Sheet } from '../ui/kit';
 
 type Line = ProjectView['storylines'][number];
 
-function EditPopup({ line, onClose, onSaved }: { line: Line | null; onClose: () => void; onSaved: () => void }) {
+function EditSheet({ line, onClose, onSaved }: { line: Line | null; onClose: () => void; onSaved: () => void }) {
   const [draft, setDraft] = useState<Partial<StorylineContent>>({});
   const [busy, setBusy] = useState(false);
   if (!line) return null;
@@ -28,31 +30,34 @@ function EditPopup({ line, onClose, onSaved }: { line: Line | null; onClose: () 
     }
   };
   return (
-    <Popup visible onMaskClick={onClose} bodyStyle={{ borderRadius: '12px 12px 0 0', maxHeight: '80vh', overflow: 'auto' }}>
-      <div className="popup-body">
-        <Form layout="vertical">
-          <Form.Item label="标题">
-            <Input value={value.title} onChange={(v) => setDraft({ ...draft, title: v })} maxLength={40} />
-          </Form.Item>
-          <Form.Item label="视觉风格" help="写具体的视觉关键词，如“日系清新，色调偏暖”">
-            <Input value={value.style} onChange={(v) => setDraft({ ...draft, style: v })} maxLength={60} />
-          </Form.Item>
-          <Form.Item label="开场钩子">
-            <TextArea value={value.hook} onChange={(v) => setDraft({ ...draft, hook: v })} autoSize maxLength={80} />
-          </Form.Item>
-          <Form.Item label="时长">
-            <Selector
-              options={STORY_DURATIONS.map((d) => ({ label: `${d} 秒`, value: d }))}
-              value={[value.durationSec]}
-              onChange={(v) => v[0] && setDraft({ ...draft, durationSec: v[0] })}
-            />
-          </Form.Item>
-        </Form>
-        <Button block color="primary" loading={busy} onClick={() => void save()}>
+    <Sheet
+      visible
+      onClose={onClose}
+      title="编辑故事线"
+      footer={
+        <Btn block size="lg" variant="primary" loading={busy} onClick={() => void save()}>
           保存
-        </Button>
-      </div>
-    </Popup>
+        </Btn>
+      }
+    >
+      <Field label="标题">
+        <Input className="ui-input" value={value.title} onChange={(v) => setDraft({ ...draft, title: v })} maxLength={40} />
+      </Field>
+      <Field label="视觉风格" hint="写具体的视觉关键词，如“日系清新，色调偏暖”">
+        <Input className="ui-input" value={value.style} onChange={(v) => setDraft({ ...draft, style: v })} maxLength={60} />
+      </Field>
+      <Field label="开场钩子">
+        <TextArea className="ui-input" value={value.hook} onChange={(v) => setDraft({ ...draft, hook: v })} autoSize maxLength={80} />
+      </Field>
+      <Field label="时长">
+        <ChoiceGroup
+          label="时长"
+          options={STORY_DURATIONS.map((d) => ({ label: `${d} 秒`, value: d, icon: <IconClock size={18} /> }))}
+          value={[value.durationSec]}
+          onChange={(v) => v[0] && setDraft({ ...draft, durationSec: v[0] })}
+        />
+      </Field>
+    </Sheet>
   );
 }
 
@@ -107,52 +112,69 @@ export function StorylinesPage() {
   };
 
   return (
-    <div className="page">
+    <FlowPage bar>
       <PageHeader title="选择故事线" step={1} back={`/p/${projectId}/product`} />
-      {view.storylines.length === 0 && <EmptyHint text="还没有故事线" />}
-      {view.storylines.map((line) => (
-        <div key={line.id} className={`storyline-card ${line.selected ? 'selected' : ''}`} data-testid="storyline-card">
-          <div className="storyline-head">
-            <span className="storyline-title">{line.content.title}</span>
-            <Tag color="primary" fill="outline">
-              {STORY_TYPES[line.content.type]}
-            </Tag>
-            <Tag>{line.content.durationSec} 秒</Tag>
-          </div>
-          <div className="muted">风格：{line.content.style}</div>
-          <div className="hook">开场：{line.content.hook}</div>
-          <ul className="segments">
-            {line.content.segments.map((s, i) => (
-              <li key={i}>
-                <b>
-                  {s.startSec}-{s.endSec}s
-                </b>
-                ：{s.content}
-              </li>
-            ))}
-          </ul>
-          <div className="row-gap">
-            <Button size="small" onClick={() => setEditing(line)}>
-              编辑
-            </Button>
-            <Button size="small" color="primary" loading={busy === line.id} disabled={Boolean(busy)} onClick={() => void select(line)} data-testid="select-storyline">
-              {line.selected ? '重新生成故事板' : '用这条'}
-            </Button>
-          </div>
-        </div>
-      ))}
+      <Section title="创意方向" desc="AI 根据已确认的卖点给出 4 条故事线，选一条生成故事板；不满意可以换一批">
+        {view.storylines.length === 0 && <EmptyHint text="还没有故事线" />}
+        {view.storylines.map((line) => (
+          <article key={line.id} className={cx('ui-story', line.selected && 'is-selected')} data-testid="storyline-card">
+            <div className="ui-story__tags">
+              {line.selected && <Pill tone="success">已选</Pill>}
+              <Pill>{STORY_TYPES[line.content.type]}</Pill>
+              <Pill>{line.content.durationSec} 秒</Pill>
+            </div>
+            <h3 className="ui-story__title">{line.content.title}</h3>
+            <div className="ui-story__style">风格：{line.content.style}</div>
+            <div className="ui-story__hook">开场：{line.content.hook}</div>
+            <ol className="ui-timeline">
+              {line.content.segments.map((s, i) => (
+                <li key={i}>
+                  <span className="ui-timeline__time">
+                    {s.startSec}-{s.endSec}s
+                  </span>
+                  <span>{s.content}</span>
+                </li>
+              ))}
+            </ol>
+            <div className="ui-story__actions">
+              <Btn size="sm" variant="surface" onClick={() => setEditing(line)}>
+                编辑
+              </Btn>
+              <Btn
+                size="sm"
+                variant="primary"
+                block
+                loading={busy === line.id}
+                disabled={Boolean(busy)}
+                onClick={() => void select(line)}
+                data-testid="select-storyline"
+              >
+                {line.selected ? '重新生成故事板' : '用这条'}
+              </Btn>
+            </div>
+          </article>
+        ))}
+      </Section>
       <ChatBox projectId={projectId} page="storylines" onApplied={() => void refresh()} />
       <BottomBar>
-        <Button block loading={busy === 'regenerate'} disabled={Boolean(busy)} onClick={() => void regenerate()}>
+        <Btn
+          block
+          size="lg"
+          variant="secondary"
+          icon={<IconRefresh size={18} />}
+          loading={busy === 'regenerate'}
+          disabled={Boolean(busy)}
+          onClick={() => void regenerate()}
+        >
           换一换
-        </Button>
+        </Btn>
         {view.storyboard && (
-          <Button block color="primary" onClick={() => navigate(`/p/${projectId}/storyboard`)}>
+          <Btn block size="lg" variant="primary" onClick={() => navigate(`/p/${projectId}/storyboard`)}>
             查看故事板
-          </Button>
+          </Btn>
         )}
       </BottomBar>
-      <EditPopup line={editing} onClose={() => setEditing(null)} onSaved={() => void refresh()} />
-    </div>
+      <EditSheet line={editing} onClose={() => setEditing(null)} onSaved={() => void refresh()} />
+    </FlowPage>
   );
 }
