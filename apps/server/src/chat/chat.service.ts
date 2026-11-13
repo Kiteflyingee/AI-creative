@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import {
   SHOT_EDITABLE_FIELDS,
   SHOT_FIELD_LABELS,
-  STORY_DURATIONS,
   storyboardSpecSchema,
   type DurationRule,
   type Shot,
@@ -86,19 +85,20 @@ const OPS_DOC: Record<ChatPage, string> = {
 - {"op":"update_fact","factId","text"}：改写一条卖点
 - {"op":"remove_fact","factId"}：删除一条卖点
 - {"op":"confirm_fact","factId"}：确认一条 AI 建议的卖点`,
-  storylines: `- {"op":"regenerate_storylines","direction"}：按方向重新生成 4 条故事线，direction 写清人群、类型、时长、卖点、风格等要求
-- {"op":"update_storyline","storylineId","title"?,"style"?,"hook"?,"durationSec"?}：修改某一条故事线（durationSec 只能是 15/30/60）`,
+  storylines: `- {"op":"regenerate_storylines","direction"}：按方向重新生成 4 条故事线，direction 写清人群、类型、卖点、风格等要求，沿用项目已选时长
+- {"op":"update_storyline","storylineId","title"?,"style"?,"hook"?}：修改某一条故事线
+成片时长已在确认卖点页选定。如果商家要求改时长，说明需要回到确认卖点页重新选择并生成故事线，不要输出修改时长的操作。`,
   storyboard: `- {"op":"update_shot","shotId","changes":{字段: 新内容}}：修改镜头，可改字段：${fieldList}
 - {"op":"set_shot_duration","shotId","durationSec"}：修改单个镜头时长
 - {"op":"add_shot","afterShotId"(null 表示放最前),"shot":{字段: 内容},"durationSec"?}：新增镜头
 - {"op":"remove_shot","shotId"}：删除镜头
 - {"op":"move_shot","shotId","toIndex"(从 0 开始)}：调整镜头顺序
-- {"op":"set_total_duration","durationSec"(15/30/60)}：修改总时长，各镜头按比例重新分配
 - {"op":"set_shot_refs","shotId","refIds"}：修改镜头使用的参考图
 - {"op":"update_reference","refId","name"?,"description"?}：修改参考图的名称、描述
 - {"op":"regenerate_reference","refId","instruction"}：按要求重新生成某张参考图（如“把客厅换成浴室”“商品换成白色影棚背景”）
 - {"op":"update_profiles","styleProfile"?,"voiceProfile"?}：修改全片风格、口播音色
-- {"op":"back_to_storylines","direction"}：对故事线方向不满意，回到故事线按新方向重新生成`,
+- {"op":"back_to_storylines","direction"}：对故事线方向不满意，回到故事线按新方向重新生成
+如果商家要求修改成片总时长，说明需要回到确认卖点页选择新时长并重新规划，不要输出 set_total_duration。`,
   work: `- {"op":"update_caption","shotId","caption"}：修改某个镜头的字幕（只重新合成，不重新生成视频）
 - {"op":"reshoot_shot","shotId","changes"?:{字段: 新内容}}：重新生成某个镜头，可同时修改镜头内容（可改字段：${fieldList}）；需要商家在确认页确认后才会生成
 - {"op":"revert_shot","shotId","clipVersion"}：把某个镜头换回之前生成的某个版本（只重新合成）`,
@@ -175,6 +175,9 @@ export class ChatService {
     const page = edit.page as ChatPage;
     const { baseVersion, items } = edit.operations as { baseVersion: number | null; items: Op[] };
     const project = await this.projects.requireProject(userId, edit.projectId);
+    if (items.some((op) => op.op === 'set_total_duration' || (op.op === 'update_storyline' && op.durationSec !== undefined))) {
+      throw badRequest('DURATION_REPLAN_REQUIRED', '请回到确认卖点页选择成片时长，并重新生成故事线');
+    }
     const result: { navigate?: { page: string; shotIds?: string[] } } = {};
 
     if (page === 'product') {
@@ -300,7 +303,7 @@ export class ChatService {
         const ok = d.generatedVersions?.some((v) => v.shotId === op.shotId && v.version === op.clipVersion);
         if (!ok) return `镜头 ${String(op.shotId)} 没有版本 ${String(op.clipVersion)}`;
       }
-      if (op.op === 'set_total_duration' && !STORY_DURATIONS.includes(op.durationSec as 15)) return '总时长只能是 15/30/60';
+      if (op.op === 'set_total_duration' || (op.op === 'update_storyline' && op.durationSec !== undefined)) return '调整成片时长请回到确认卖点页选择新时长并重新规划，不要直接修改既有故事线或故事板的总时长';
     }
     return null;
   }

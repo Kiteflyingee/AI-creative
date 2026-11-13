@@ -5,7 +5,6 @@ import {
   REFERENCE_KIND_LABELS,
   SHOT_EDITABLE_FIELDS,
   SHOT_FIELD_LABELS,
-  STORY_DURATIONS,
   type Reference,
   type Shot,
   type StoryboardSpec,
@@ -17,7 +16,7 @@ import { api, showError } from '../api';
 import { AssetImage, BottomBar, ChatBox, EmptyHint, FlowPage, Loading, PageHeader, Section, UploadButton } from '../components';
 import { useProject, useRefreshProject } from '../hooks';
 import type { AssetKind, ProjectView } from '../types';
-import { IconArrowDown, IconArrowUp, IconClock, IconPlus, IconSparkle, IconTrash } from '../ui/icons';
+import { IconArrowDown, IconArrowUp, IconPlus, IconSparkle, IconTrash } from '../ui/icons';
 import { Btn, ChoiceGroup, Field, IconButton, Pill, Sheet } from '../ui/kit';
 
 const KIND_TO_ASSET: Record<Reference['kind'], AssetKind> = { product: 'PRODUCT', character: 'CHARACTER', scene: 'SCENE' };
@@ -241,17 +240,6 @@ export function StoryboardPage() {
     if (exists) await updateShot(shot);
     else if (await saveSpec({ ...spec, shots: [...spec.shots, shot] })) setEditing(null);
   };
-  const setTotal = async (durationSec: number) => {
-    setBusy(true);
-    try {
-      await api.post(`/app/v1/projects/${projectId}/storyboard/duration`, { durationSec, expectedVersion: board.version });
-      await refresh();
-    } catch (err) {
-      showError(err);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const refsOf = (shot: Shot) => spec.references.filter((r) => shot.refIds.includes(r.refId));
   const clipsOf = (shotId: string) => view.clips.filter((c) => c.shotId === shotId && c.status === 'SUCCEEDED');
@@ -268,13 +256,7 @@ export function StoryboardPage() {
         <p className="ui-block__desc ui-summary__desc">
           风格：{spec.styleProfile || '—'} · 音色：{spec.voiceProfile || '—'}
         </p>
-        <ChoiceGroup
-          label="成片总时长"
-          options={STORY_DURATIONS.map((d) => ({ label: `${d} 秒`, value: d, icon: <IconClock size={18} /> }))}
-          value={STORY_DURATIONS.includes(spec.durationSec as 15) ? [spec.durationSec as 15] : []}
-          onChange={(v) => v[0] && v[0] !== spec.durationSec && void setTotal(v[0])}
-          disabled={busy}
-        />
+        <Btn size="xs" variant="ghost" onClick={() => navigate(`/p/${projectId}/product`)} data-testid="replan-duration">调整时长并重新规划</Btn>
       </section>
 
       <Section title="参考图" desc="先锁定主体，再让画面动起来">

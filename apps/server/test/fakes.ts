@@ -56,31 +56,25 @@ export class FakeLlm implements LlmProvider {
     this.calls.push(req);
     const queue = this.overrides.get(req.purpose);
     const handler = queue && queue.length > 1 ? queue.shift()! : queue?.[0];
-    const out = handler ? handler(req) : defaultLlm(req);
+    const out = await (handler ? handler(req) : defaultLlm(req));
     return { content: typeof out === 'string' ? out : JSON.stringify(out) };
   }
 }
 
-export function defaultStorylines(factKey = 'F1') {
+export function defaultStorylines(factKey = 'F1', durationSec = 15) {
   const types = ['product_share', 'drama', 'host_talk', 'brand_film'];
   return {
     storylines: types.map((type, i) => ({
       title: `测试故事线${i + 1}`,
       type,
       style: '日系清新，色调偏暖',
-      durationSec: i < 2 ? 15 : 30,
+      durationSec,
       hook: '开场展示痛点',
       audience: '年轻上班族',
-      segments:
-        i < 2
-          ? [
-              { startSec: 0, endSec: 3, content: '痛点开场' },
-              { startSec: 3, endSec: 15, content: '展示商品' },
-            ]
-          : [
-              { startSec: 0, endSec: 5, content: '痛点开场' },
-              { startSec: 5, endSec: 30, content: '展示商品' },
-            ],
+      segments: [
+        { startSec: 0, endSec: 3, content: '痛点开场' },
+        { startSec: 3, endSec: durationSec, content: '展示商品' },
+      ],
       sellingPointIds: [factKey],
     })),
   };
@@ -100,7 +94,7 @@ function defaultLlm(req: LlmRequest): unknown {
         suggestions: ['补一张细节图'],
       };
     case 'storylines':
-      return defaultStorylines();
+      return defaultStorylines('F1', Number(/成片时长：(\d+) 秒/.exec(req.user)?.[1] ?? 15));
     case 'storyboard': {
       const n = Number(/建议 (\d+) 个/.exec(req.user)?.[1] ?? 3);
       return {
@@ -262,7 +256,7 @@ export class FakeImageProvider implements ImageProvider {
     if (this.fail) throw new ProviderError('fake-image', 'InternalError', '生成失败', false, 500);
     const image = sharp({ create: { width: 576, height: 1024, channels: 3, background: '#88aacc' } });
     // Gemini 图片模型返回 PNG，火山返回 JPEG
-    if (this.capability.provider === 'google-gemini') return { data: await image.png().toBuffer(), mime: 'image/png' };
+    if (this.capability.provider === 'google-vertex') return { data: await image.png().toBuffer(), mime: 'image/png' };
     return { data: await image.jpeg().toBuffer(), mime: 'image/jpeg' };
   }
 }

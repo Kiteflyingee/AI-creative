@@ -1410,6 +1410,88 @@
   height: 18px;
 }
 
+/* 故事线 / 故事板的真实生成进展 */
+.ui-creation {
+  padding-top: var(--ui-s5);
+}
+.ui-creation__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-s2);
+  color: var(--ui-text-2);
+  font-size: 14px;
+}
+.ui-creation__eyebrow > span {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.ui-creation__title {
+  margin: var(--ui-s6) 0 var(--ui-s2);
+  font-size: 28px;
+  line-height: 1.3;
+  font-weight: 500;
+  letter-spacing: -0.5px;
+}
+.ui-creation__intro {
+  margin: 0 0 var(--ui-s6);
+  color: var(--ui-text-2);
+}
+.ui-creation__details {
+  margin-top: var(--ui-s4);
+  padding: var(--ui-s2) var(--ui-s4);
+  background: var(--ui-fill);
+  border-radius: var(--ui-r-md);
+  overflow-wrap: anywhere;
+}
+.ui-creation__details > summary {
+  min-height: 44px;
+  align-content: center;
+  cursor: pointer;
+  font-weight: 500;
+}
+.ui-creation__details > summary:focus-visible {
+  outline: 2px solid var(--ui-ink);
+  outline-offset: 2px;
+}
+.ui-creation__details p,
+.ui-creation__details ul {
+  margin: var(--ui-s2) 0 var(--ui-s4);
+  line-height: 1.6;
+}
+.ui-creation__details ul {
+  padding-left: var(--ui-s5);
+}
+.ui-creation__events {
+  list-style: none;
+  margin: var(--ui-s2) 0 var(--ui-s4);
+  padding: 0;
+  display: grid;
+  gap: var(--ui-s3);
+  color: var(--ui-text-2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.ui-creation__events li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ui-s3);
+}
+.ui-creation__events li > :first-child {
+  flex-shrink: 0;
+}
+.ui-creation__events .is-current {
+  color: var(--ui-text);
+}
+.ui-creation .ui-dot--running {
+  background: var(--ui-ink);
+}
+.ui-creation__note {
+  margin-top: var(--ui-s5);
+  color: var(--ui-text-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 /* “更多（选填）”折叠块 */
 .ui-more {
   display: flex;
@@ -2935,6 +3017,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .ui-creation .ui-spinner {
+    animation: none;
+  }
   .ui-skel,
   .ui-dot--running {
     animation: none;

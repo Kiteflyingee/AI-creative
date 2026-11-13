@@ -1,4 +1,4 @@
-import { NARRATION_HARD_LIMIT, NARRATION_SOFT_LIMIT, STORY_TYPES } from '@ai-creative/shared';
+import { NARRATION_HARD_LIMIT, NARRATION_SOFT_LIMIT, STORY_TYPES, type StoryDuration } from '@ai-creative/shared';
 import { z } from 'zod';
 
 /**
@@ -6,7 +6,7 @@ import { z } from 'zod';
  * 卖点要具体可拍、口播短、每镜一个主要动作、先用参考图锁定主体。
  * 修改提示词时同步提升 PROMPT_VERSION，便于对比效果。
  */
-export const PROMPT_VERSION = 'v0.3.1';
+export const PROMPT_VERSION = 'v0.4.0';
 
 const s = (max: number) => z.string().transform((v) => v.trim().slice(0, max));
 
@@ -69,7 +69,7 @@ export const storylinesOutputSchema = z.object({
   storylines: z.array(z.unknown()).length(4),
 });
 
-export function storylinesSystem(): string {
+export function storylinesSystem(durationSec: StoryDuration = 15): string {
   const types = Object.entries(STORY_TYPES)
     .map(([k, v]) => `${k}（${v}）`)
     .join('、');
@@ -78,7 +78,7 @@ export function storylinesSystem(): string {
 规则：
 1. 4 条故事线的 type 必须各不相同，从 ${types} 中各选一个。
 2. title：一句话概括创意（≤20 字）。style：具体的视觉关键词，如“日系清新，色调偏暖，画面干净”，不要“好看、高级”。
-3. durationSec 只能是 15、30、60。商家指定了时长就用指定时长；没有指定时，4 条里至少有 2 条 15 秒，其余 30 秒。
+3. 成片时长已由商家选定为 ${durationSec} 秒，4 条故事线的 durationSec 必须全部等于 ${durationSec}。按这个时长编排内容、口播和节奏，不得自行改时长；方向文字若提到其他时长，仍以该明确选择为准。
 4. segments 按时间轴分段（如 0-3 / 3-10 / 10-15），从 0 开始首尾相接、没有空档，最后一段的 endSec 等于 durationSec；每段写清这段拍什么、说什么。
 5. 前 3 秒必须有开场钩子（痛点、悬念、反差或强视觉），写进 hook。
 6. 卖点数量与时长匹配：15 秒聚焦 2–3 个，30 秒 4–5 个，60 秒可以展开到 6 个；sellingPointIds 只能使用输入里给出的卖点 id。

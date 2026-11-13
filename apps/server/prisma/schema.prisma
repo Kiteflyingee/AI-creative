@@ -200,6 +200,8 @@ model Project {
   productId       String
   product         Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
   title           String          @default("")
+  /// 生成故事线前选择的成片目标时长；不改写既有故事板版本。
+  targetDurationSec Int           @default(15)
   /// 新建项目时按配置记录的模型组合（能力登记表键名），之后该项目一直用这一组（D-46）
   videoModel      String
   imageModel      String

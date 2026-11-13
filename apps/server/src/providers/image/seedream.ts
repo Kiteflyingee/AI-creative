@@ -21,7 +21,8 @@ export class SeedreamProvider implements ImageProvider {
 
   async generate(req: ImageGenerateRequest): Promise<ImageGenerateResult> {
     const env = getEnv();
-    const images = (req.images ?? []).slice(0, this.capability.maxReferenceImages).map(imageInputToUrl);
+    if ((req.images?.length ?? 0) > this.capability.maxReferenceImages) throw new ProviderError('seedream', 'TOO_MANY_IMAGES', '参考图数量超过图片模型能力限制', false);
+    const images = (req.images ?? []).map(imageInputToUrl);
     const body: Record<string, unknown> = {
       model: this.capability.modelId,
       prompt: req.prompt,

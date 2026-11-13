@@ -27,6 +27,7 @@ export class ProviderError extends Error {
     /** 可重试：限流、网络、5xx */
     public readonly retryable: boolean,
     public readonly httpStatus?: number,
+    public readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = 'ProviderError';

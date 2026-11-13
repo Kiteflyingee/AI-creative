@@ -1,9 +1,10 @@
 import { getEnv } from '../config/env';
+import { badRequest } from '../common/errors';
 import type { ImageModelCapability, VideoModelCapability } from './types';
 
 /**
  * 模型能力登记表（D-39）。新增模型时在这里登记能力，并在 providers/factory.ts 里登记适配器。
- * 数据来源：docs/06-模型能力与约束.md（火山方舟、Google Gemini API 官方文档）。
+ * 数据来源：docs/06-模型能力与约束.md、docs/08-Vertex-AI接入.md（火山方舟、Google Cloud 官方文档）。
  */
 export function videoModelRegistry(): Record<string, VideoModelCapability> {
   const env = getEnv();
@@ -38,11 +39,11 @@ export function videoModelRegistry(): Record<string, VideoModelCapability> {
       },
       resultUrlTtlHours: 24,
     },
-    'gemini-omni-1.2-flash': {
-      key: 'gemini-omni-1.2-flash',
+    'vertex-gemini-omni-1.2-flash': {
+      key: 'vertex-gemini-omni-1.2-flash',
       label: 'Gemini Omni 1.2 Flash',
-      provider: 'google-gemini',
-      modelId: env.OMNI_MODEL_ID,
+      provider: 'google-vertex',
+      modelId: env.VERTEX_OMNI_MODEL_ID,
       // 官方：3–15 秒（默认 10 秒）；与 Seedance 一样按单镜头 5 秒左右规划
       duration: { min: 3, max: 15, recommended: 5 },
       // 官方另有 360p 与 4K；按 D-07 只开放 720p / 1080p（没有 480p）
@@ -60,7 +61,7 @@ export function videoModelRegistry(): Record<string, VideoModelCapability> {
       faceInput: 'reject',
       virtualPortraits: false,
       regions: ['global'],
-      limits: { maxConcurrency: env.GEMINI_VIDEO_MAX_CONCURRENCY, rpm: env.GEMINI_VIDEO_RPM, queryQps: 5 },
+      limits: { maxConcurrency: env.VERTEX_VIDEO_MAX_CONCURRENCY, rpm: env.VERTEX_VIDEO_RPM, queryQps: 5 },
       // 官方没有写明参考图尺寸限制，按保守值登记；发送前统一转成 JPEG（最长边 2048）
       imageInput: {
         formats: ['jpeg', 'png', 'webp'],
@@ -70,8 +71,8 @@ export function videoModelRegistry(): Record<string, VideoModelCapability> {
         maxRatio: 2.5,
         maxBytes: 30 * 1024 * 1024,
       },
-      // 免费层 interaction 只保留 1 天，付费层 55 天；按 1 天登记
-      resultUrlTtlHours: 24,
+      // Vertex AI 存储/后台 interaction 最多保留 7 天；成功后立即转存并删除
+      resultUrlTtlHours: 7 * 24,
     },
   };
 }
@@ -92,11 +93,11 @@ export function imageModelRegistry(): Record<string, ImageModelCapability> {
       trustedFaceForVideoProvider: { provider: 'volcengine-ark', days: 30 },
       resultUrlTtlHours: 24,
     },
-    'nano-banana-2.1': {
-      key: 'nano-banana-2.1',
+    'vertex-nano-banana-2.1': {
+      key: 'vertex-nano-banana-2.1',
       label: 'Nano Banana 2.1',
-      provider: 'google-gemini',
-      modelId: env.NANO_BANANA_MODEL_ID,
+      provider: 'google-vertex',
+      modelId: env.VERTEX_IMAGE_MODEL_ID,
       textToImage: true,
       imageToImage: true,
       // 官方：最多 14 张输入图
@@ -111,12 +112,18 @@ export function imageModelRegistry(): Record<string, ImageModelCapability> {
 }
 
 export function videoCapability(key: string): VideoModelCapability {
+  if (key === 'gemini-omni-1.2-flash') {
+    throw badRequest('MODEL_RETIRED', '此项目使用的 Gemini API 直连入口已停用，请新建 Vertex AI 项目');
+  }
   const cap = videoModelRegistry()[key];
   if (!cap) throw new Error(`未登记的视频模型：${key}`);
   return cap;
 }
 
 export function imageCapability(key: string): ImageModelCapability {
+  if (key === 'nano-banana-2.1') {
+    throw badRequest('MODEL_RETIRED', '此项目使用的 Gemini API 直连入口已停用，请新建 Vertex AI 项目');
+  }
   const cap = imageModelRegistry()[key];
   if (!cap) throw new Error(`未登记的图片模型：${key}`);
   return cap;

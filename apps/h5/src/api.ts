@@ -1,4 +1,5 @@
 import { Toast } from 'antd-mobile';
+import { creativeStreamEventSchema, type ReportCreativeProgress } from '@ai-creative/shared';
 
 const TOKEN_KEY = 'aic_token';
 const USER_KEY = 'aic_user';
@@ -71,7 +72,53 @@ export const api = {
   patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, body),
   del: <T>(path: string) => request<T>('DELETE', path),
   upload: <T>(path: string, form: FormData) => request<T>('POST', path, form),
+  postStream,
 };
+
+/** 流式展示真实阶段；断线不自动重发，避免重复创建方案或参考图。 */
+async function postStream(path: string, body: unknown, onProgress: ReportCreativeProgress): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() ?? ''}` }, body: JSON.stringify(body) });
+  } catch {
+    throw new ApiError(0, 'NETWORK', '连接中断，请先查看最新结果，再决定是否重新生成');
+  }
+  if (!res.ok) {
+    const err = await res.json() as { code?: string; message?: string };
+    if (res.status === 401) clearSession();
+    throw new ApiError(res.status, err.code ?? `HTTP_${res.status}`, err.message ?? '请求失败');
+  }
+  if (!res.body || !res.headers.get('Content-Type')?.includes('application/x-ndjson')) throw new ApiError(502, 'STREAM_INVALID', '无法读取生成进度，请先查看最新结果');
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const consume = (line: string): boolean => {
+    if (!line.trim()) return false;
+    const event = creativeStreamEventSchema.parse(JSON.parse(line));
+    if (event.type === 'error') throw new ApiError(event.status, event.code, event.message);
+    if (event.type === 'progress') onProgress(event.progress);
+    return event.type === 'done';
+  };
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) if (consume(line)) return;
+      if (done) {
+        if (buffer && consume(buffer)) return;
+        throw new Error('Stream ended without done');
+      }
+    }
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(0, 'STREAM_INTERRUPTED', '进度连接中断，请先查看最新结果，避免重复生成');
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
 
 /** 统一的错误提示 */
 export function showError(err: unknown) {

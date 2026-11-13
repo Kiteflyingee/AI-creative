@@ -6,7 +6,7 @@
  * 使用 .env 里配置的模型组合（VIDEO_MODEL / IMAGE_MODEL）。
  * 流程：大模型素材理解 → 故事线 → 故事板（图片模型生成人物、场景图）→ 只保留 2 个最短时长的镜头
  *      → 视频模型以最低分辨率生成 → Remotion 合成 → 重做第 2 个镜头 → 再合成。
- * 视频调用 3 次。费用估算见下方 PRICE（Seedance 按 06 §8.4；Omni 按 06 §14 的官方单价折算）。
+ * 视频调用 3 次。费用估算见下方 PRICE；Vertex 的项目适用单价需执行前另行核对。
  * 要用真实的公网存储时，把 MODEL_IMAGE_TRANSPORT 改为 signed_url。
  */
 import 'reflect-metadata';
@@ -15,7 +15,6 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../app.module';
 import { AssetsService } from '../assets/assets.service';
 import { AuthService } from '../auth/auth';
-import { getEnv } from '../config/env';
 import { StoryboardService } from '../creative/storyboard.service';
 import { StorylinesService } from '../creative/storylines.service';
 import { GenerationService } from '../generation/generation.service';
@@ -25,29 +24,19 @@ import { ProjectsService } from '../projects/projects.service';
 import { allowedValues } from '@ai-creative/shared';
 import { defaultModels, imageCapability, videoCapability } from '../providers/registry';
 import { InlineRunner } from './inline-runner';
+import { getEnv } from '../config/env';
+import { vertexAccessToken, vertexBase } from '../providers/vertex';
+import { createLlmAdapter } from '../providers/llm/factory';
 
 const VIDEO_CALLS = 3;
 /** 最低分辨率的每秒单价（只用于冒烟前的费用提示，产品内不计算费用，D-32） */
 const PRICE: Record<string, { perSec: number; currency: string; note: string }> = {
   'seedance-2.5': { perSec: 0.672, currency: '元', note: '480p，06 §8.4' },
-  'gemini-omni-1.2-flash': { perSec: 0.0695, currency: '美元', note: '720p，06 §14' },
 };
 
 function arg(name: string) {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : undefined;
-}
-
-/** 检查用到的供应商是否都配置了密钥 */
-function missingKeys(providers: string[]): string[] {
-  const env = getEnv();
-  const missing: string[] = [];
-  if (providers.includes('volcengine-ark') && !env.ARK_API_KEY) missing.push('ARK_API_KEY');
-  if (providers.includes('google-gemini') && !env.GEMINI_API_KEY) missing.push('GEMINI_API_KEY');
-  if (env.LLM_PROVIDER === 'deepseek' && !env.DEEPSEEK_API_KEY) missing.push('DEEPSEEK_API_KEY');
-  if (env.LLM_PROVIDER === 'ark' && !env.ARK_API_KEY) missing.push('ARK_API_KEY');
-  if (env.LLM_PROVIDER === 'openai_compatible' && !env.LLM_API_KEY) missing.push('LLM_API_KEY');
-  return [...new Set(missing)];
 }
 
 async function main() {
@@ -70,8 +59,16 @@ async function main() {
     return;
   }
   if (!image) throw new Error('请用 --image 指定一张真实的商品图');
-  const missing = missingKeys([video.provider, imageModel.provider]);
-  if (missing.length) throw new Error(`请先在 .env 中填写：${missing.join('、')}`);
+  const env = getEnv();
+  const usesVertex = [video.provider, imageModel.provider].includes('google-vertex') || env.LLM_PROVIDER === 'vertex';
+  if ([video.provider, imageModel.provider].includes('volcengine-ark') && !env.ARK_API_KEY) throw new Error('请配置 ARK_API_KEY');
+  if (usesVertex) {
+    vertexBase();
+    await vertexAccessToken();
+  }
+  createLlmAdapter();
+  const llmKey = env.LLM_PROVIDER === 'deepseek' ? env.DEEPSEEK_API_KEY : env.LLM_PROVIDER === 'ark' ? env.ARK_API_KEY : env.LLM_API_KEY;
+  if (env.LLM_PROVIDER !== 'vertex' && !llmKey) throw new Error('请配置大模型供应商密钥');
 
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['log', 'warn', 'error'] });
   runner.attach(app);

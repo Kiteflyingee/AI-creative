@@ -1,3 +1,4 @@
+import { resetEnvCache } from '../src/config/env';
 import { videoCapability } from '../src/providers/registry';
 import type { ShotRenderSpec } from '../src/providers/types';
 import { compileSeedancePrompt, mapArkStatus, parseArkTask, sanitizePromptText, SeedanceProvider } from '../src/providers/video/seedance';
@@ -128,5 +129,41 @@ describe('Seedance 请求', () => {
     expect(mapArkStatus('queued')).toBe('queued');
     expect(mapArkStatus('running')).toBe('running');
     expect(mapArkStatus('expired')).toBe('unknown');
+  });
+});
+
+describe('Seedance 原生任务生命周期', () => {
+  let network: jest.SpyInstance;
+  beforeEach(() => {
+    process.env.ARK_API_KEY = 'ark-test-key';
+    resetEnvCache();
+    network = jest.spyOn(global, 'fetch');
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+    process.env.ARK_API_KEY = '';
+    resetEnvCache();
+  });
+
+  it.each(['timeout', 'network', 'server', 'missing-id', 'invalid-id'])('%s 提交结果不确定，禁止自动重发', async (kind) => {
+    if (kind === 'timeout') network.mockRejectedValue(Object.assign(new Error('timeout'), { name: 'TimeoutError' }));
+    else if (kind === 'network') network.mockRejectedValue(new TypeError('connection reset'));
+    else network.mockResolvedValue(new Response(JSON.stringify(kind === 'invalid-id' ? { id: 42 } : {}), { status: kind === 'server' ? 503 : 200 }));
+    const provider = new SeedanceProvider(videoCapability('seedance-2.5'));
+    await expect(provider.createTask({ compiled: provider.compile(spec()), images: [] })).rejects.toMatchObject({ code: 'SUBMIT_UNKNOWN', retryable: false });
+    expect(network).toHaveBeenCalledTimes(1);
+  });
+
+  it('429 可交由业务退避；查询与取消使用原生任务 ID', async () => {
+    network.mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'TooManyRequests', message: 'quota' } }), { status: 429 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'cgt-1', status: 'running' })))
+      .mockResolvedValueOnce(new Response('{}'))
+      .mockResolvedValueOnce(new Response('{}', { status: 400 }));
+    const provider = new SeedanceProvider(videoCapability('seedance-2.5'));
+    await expect(provider.createTask({ compiled: provider.compile(spec()), images: [] })).rejects.toMatchObject({ retryable: true, httpStatus: 429 });
+    expect(await provider.getTask('cgt-1')).toMatchObject({ state: 'running' });
+    expect(await provider.cancelTask('cgt-1')).toBe('cancelled');
+    expect(await provider.cancelTask('cgt-2')).toBe('not_cancellable');
+    expect(network.mock.calls[2]).toMatchObject(['https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/cgt-1', { method: 'DELETE', redirect: 'error' }]);
   });
 });

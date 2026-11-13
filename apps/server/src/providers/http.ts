@@ -5,15 +5,9 @@ export interface HttpJsonOptions {
   method?: 'GET' | 'POST' | 'DELETE';
   url: string;
   apiKey: string;
-  /** 密钥放在哪个请求头：bearer = Authorization: Bearer（默认）；x-goog-api-key = Google Gemini API */
-  auth?: 'bearer' | 'x-goog-api-key';
   headers?: Record<string, string>;
   body?: unknown;
   timeoutMs: number;
-}
-
-function authHeaders(auth: HttpJsonOptions['auth'], apiKey: string): Record<string, string> {
-  return auth === 'x-goog-api-key' ? { 'x-goog-api-key': apiKey } : { Authorization: `Bearer ${apiKey}` };
 }
 
 interface ErrorBody {
@@ -37,12 +31,13 @@ export async function httpJson<T>(opts: HttpJsonOptions): Promise<T> {
     res = await fetch(opts.url, {
       method: opts.method ?? 'GET',
       headers: {
-        ...authHeaders(opts.auth, opts.apiKey),
+        Authorization: `Bearer ${opts.apiKey}`,
         ...(opts.headers ?? {}),
         ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
       signal: AbortSignal.timeout(opts.timeoutMs),
+      redirect: 'error',
     });
   } catch (err) {
     const timeout = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
@@ -63,7 +58,7 @@ export async function httpJson<T>(opts: HttpJsonOptions): Promise<T> {
   if (!res.ok) {
     const errObj = (json as ErrorBody | undefined)?.error;
     const code = errorCode(errObj, res.status);
-    const message = errObj?.message ?? text.slice(0, 300);
+    const message = (errObj?.message ?? text.slice(0, 300)).replaceAll(opts.apiKey, '[已隐藏]').replace(/Bearer\s+[^\s"',;]+/gi, 'Bearer [已隐藏]');
     const retryable = res.status === 429 || res.status >= 500;
     throw new ProviderError(opts.provider, code, `${opts.provider}：${message}`, retryable, res.status);
   }
@@ -71,10 +66,10 @@ export async function httpJson<T>(opts: HttpJsonOptions): Promise<T> {
 }
 
 /** 下载远端文件（视频、图片结果）；需要鉴权的地址传 headers */
-export async function httpDownload(url: string, timeoutMs: number, headers?: Record<string, string>): Promise<Buffer> {
+export async function httpDownload(url: string, timeoutMs: number, headers?: Record<string, string>, redirect: NonNullable<RequestInit['redirect']> = 'follow'): Promise<Buffer> {
   let res: Response;
   try {
-    res = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+    res = await fetch(url, { headers, redirect, signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
     throw new ProviderError('download', 'NETWORK', `下载失败：${(err as Error).message}`, true);
   }

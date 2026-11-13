@@ -1,4 +1,4 @@
-import type { Reference, Resolution, Shot, StoryboardSpec, StorylineContent } from '@ai-creative/shared';
+import type { Reference, Resolution, Shot, StoryboardSpec, StorylineContent, StoryDuration } from '@ai-creative/shared';
 
 export type AssetKind = 'PRODUCT' | 'CHARACTER' | 'SCENE';
 
@@ -78,7 +78,7 @@ export interface JobSummary {
 }
 
 export interface ProjectView {
-  project: { id: string; title: string; currentOutputId: string | null };
+  project: { id: string; title: string; currentOutputId: string | null; targetDurationSec: StoryDuration };
   product: {
     id: string;
     name: string;

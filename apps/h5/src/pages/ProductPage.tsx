@@ -1,12 +1,14 @@
 import { ActionSheet, Dialog, Input, TextArea, Toast, type ActionSheetProps } from 'antd-mobile';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { STORY_DURATIONS, type StoryDuration } from '@ai-creative/shared';
 import { api, showError } from '../api';
 import { AssetImage, BottomBar, FlowPage, Loading, PageHeader, Section, UploadButton, uploadFiles, UploadHero } from '../components';
 import { useProject, useRefreshProject } from '../hooks';
+import { CreativeError, CreativeWaiting, useCreativeProgress } from '../CreativeProgress';
 import type { AssetKind, AssetView, FactView, ProjectView } from '../types';
-import { IconAlert, IconCheck, IconChevronRight, IconClose, IconEdit, IconPlus, IconRefresh, IconSparkle } from '../ui/icons';
-import { Btn, cx, Field, IconButton, Notice, Pill, Sheet, type Tone } from '../ui/kit';
+import { IconAlert, IconCheck, IconChevronRight, IconClock, IconClose, IconEdit, IconPlus, IconRefresh, IconSparkle } from '../ui/icons';
+import { Btn, ChoiceGroup, cx, Field, IconButton, Notice, Pill, Sheet, type Tone } from '../ui/kit';
 
 /**
  * 确认卖点页（发布流程第 3 步，D-56）：商家只需要点选至少 1 条卖点。
@@ -288,15 +290,21 @@ export function ProductPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState('');
   const [next, setNext] = useState(false);
+  const creation = useCreativeProgress();
   const [heroBusy, setHeroBusy] = useState(false);
   const [toggling, setToggling] = useState<string | null>(null);
   const [editing, setEditing] = useState<Editing>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [durationSec, setDurationSec] = useState<StoryDuration>(15);
   const autoAnalyzed = useRef(false);
 
   useEffect(() => {
     if (view) setForm({ description: view.product.description, targetAudience: view.product.targetAudience });
   }, [view?.product.description, view?.product.targetAudience]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (view) setDurationSec(view.project.targetDurationSec);
+  }, [view?.project.targetDurationSec]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const analyze = async () => {
     setAnalyzing(true);
@@ -339,6 +347,7 @@ export function ProductPage() {
   const aiName = view.product.analysis?.productName;
   const pending = analyzing && facts.length === 0;
   const dirty = form.description !== view.product.description || form.targetAudience !== view.product.targetAudience;
+  const reuseStorylines = view.project.targetDurationSec === durationSec && view.storylines.length > 0 && view.storylines.every((line) => line.content.durationSec === durationSec);
   const anyFace = view.assets.some(needsFace);
   const onChanged = () => void refresh();
 
@@ -413,21 +422,29 @@ export function ProductPage() {
   const goNext = async () => {
     if (!(await saveMore())) return;
     if (anyFace && !(await Dialog.confirm({ content: '有图片含真人脸还没处理，生成视频前需要处理。先继续吗？' }))) return;
-    if (view.storylines.length) {
+    if (reuseStorylines) {
       navigate(`/p/${projectId}/storylines`);
       return;
     }
     setNext(true);
     try {
-      await api.post(`/app/v1/projects/${projectId}/storylines`, {});
+      if (!(await creation.run(`/app/v1/projects/${projectId}/storylines/stream`, { durationSec }))) return;
       await refresh();
       navigate(`/p/${projectId}/storylines`);
-    } catch (err) {
-      showError(err);
+    } catch {
+      await refresh();
     } finally {
       setNext(false);
     }
   };
+
+  if (next) return (
+    <FlowPage bar>
+      <PageHeader title="生成故事线" step={1} back="/" />
+      <CreativeWaiting kind="storylines" events={creation.events} startedAt={creation.startedAt} durationSec={durationSec} facts={selected.map((f) => f.text)} />
+      <BottomBar><Btn block size="lg" variant="primary" loading disabled>生成中</Btn></BottomBar>
+    </FlowPage>
+  );
 
   // 还没有商品图：只显示大上传区
   if (productImages.length === 0) {
@@ -452,13 +469,15 @@ export function ProductPage() {
       ? '请先填写商品名称'
       : selected.length === 0
         ? '至少选 1 条卖点'
-        : view.storylines.length
+        : reuseStorylines
           ? '查看故事线'
-          : '生成 4 条故事线';
+          : `${view.storylines.length ? '重新生成' : '生成'} 4 条 ${durationSec} 秒故事线`;
 
   return (
     <FlowPage bar>
       <PageHeader title={name || '新商品'} step={0} back="/" />
+
+      <CreativeError message={creation.error} />
 
       {anyFace && (
         <div className="ui-notice-wrap">
@@ -548,6 +567,19 @@ export function ProductPage() {
             </button>
           )}
         </div>
+      </Section>
+
+      <Section title="成片时长" desc="故事线、口播和镜头会按这个时长规划">
+        <div data-testid="duration-choice">
+          <ChoiceGroup
+            label="成片时长"
+            options={STORY_DURATIONS.map((d) => ({ label: `${d} 秒`, value: d, icon: <IconClock size={18} /> }))}
+            value={[durationSec]}
+            onChange={(value) => value[0] && setDurationSec(value[0])}
+            disabled={next || pending}
+          />
+        </div>
+        {view.storylines.length > 0 && !reuseStorylines && <p className="ui-caption ui-mt">继续后会按所选时长重新生成故事线，已有故事板和作品保留</p>}
       </Section>
 
       <section className="ui-block">

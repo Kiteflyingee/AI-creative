@@ -1,4 +1,5 @@
-import { Body, Controller, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Param, Patch, Post, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { RESOLUTIONS, storyDurationSchema } from '@ai-creative/shared';
 import { z } from 'zod';
 import { CurrentUser, type AuthUser } from '../auth/auth';
@@ -7,8 +8,9 @@ import { ZodPipe } from '../common/zod.pipe';
 import { StoryboardService } from '../creative/storyboard.service';
 import { StorylinesService } from '../creative/storylines.service';
 import { GenerationService } from '../generation/generation.service';
+import { streamCreative } from './creative-stream';
 
-const directionSchema = z.object({ direction: z.string().trim().max(200).default('') });
+const directionSchema = z.object({ direction: z.string().trim().max(200).default(''), durationSec: storyDurationSchema.optional() });
 const storylinePatchSchema = z.object({
   title: z.string().trim().max(40).optional(),
   style: z.string().trim().max(60).optional(),
@@ -41,7 +43,12 @@ export class CreativeController {
 
   @Post('projects/:id/storylines')
   generateStorylines(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body(new ZodPipe(directionSchema)) body: z.infer<typeof directionSchema>) {
-    return this.storylines.generate(user.id, id, body.direction);
+    return this.storylines.generate(user.id, id, body.direction, body.durationSec);
+  }
+
+  @Post('projects/:id/storylines/stream')
+  streamStorylines(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body(new ZodPipe(directionSchema)) body: z.infer<typeof directionSchema>, @Res() res: Response) {
+    return streamCreative(res, (report) => this.storylines.generate(user.id, id, body.direction, body.durationSec, report));
   }
 
   @Patch('storylines/:storylineId')
@@ -56,6 +63,11 @@ export class CreativeController {
   @Post('storylines/:storylineId/select')
   selectStoryline(@CurrentUser() user: AuthUser, @Param('storylineId') storylineId: string) {
     return this.storyboards.generateFromStoryline(user.id, storylineId);
+  }
+
+  @Post('storylines/:storylineId/select/stream')
+  streamStoryboard(@CurrentUser() user: AuthUser, @Param('storylineId') storylineId: string, @Res() res: Response) {
+    return streamCreative(res, (report) => this.storyboards.generateFromStoryline(user.id, storylineId, report));
   }
 
   @Patch('projects/:id/storyboard')

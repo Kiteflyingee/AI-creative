@@ -10,6 +10,7 @@ import {
   storylineContentSchema,
   type DurationRule,
   type Reference,
+  type ReportCreativeProgress,
   type Resolution,
   type Shot,
   type StoryboardSpec,
@@ -66,11 +67,12 @@ export class StoryboardService {
   }
 
   /** 选定故事线后生成故事板：逐镜脚本 + 参考图规划；需要的人物图、场景图随即在后台生成 */
-  async generateFromStoryline(userId: string, storylineId: string) {
+  async generateFromStoryline(userId: string, storylineId: string, onProgress?: ReportCreativeProgress) {
     const storyline = await this.prisma.storyline.findFirst({ where: { id: storylineId, project: { userId } } });
     if (!storyline) throw notFound('故事线');
     const project = await this.projects.requireProject(userId, storyline.projectId);
     const content = storylineContentSchema.parse(storyline.content);
+    if (content.durationSec !== project.targetDurationSec) throw badRequest('DURATION_CHANGED', '成片时长已变更，请选择按当前时长生成的故事线');
     const product = await this.prisma.product.findUniqueOrThrow({
       where: { id: project.productId },
       include: { facts: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] } },
@@ -82,6 +84,7 @@ export class StoryboardService {
     });
     const productImages = uploads.filter((a) => a.kind === 'PRODUCT' && a.faceResolution !== 'EXCLUDED');
     if (productImages.length === 0) throw badRequest('IMAGE_REQUIRED', '没有可用的商品图');
+    onProgress?.({ phase: 'preparing' });
     const characters = uploads.filter((a) => a.kind === 'CHARACTER' && a.faceResolution !== 'EXCLUDED');
     const scenes = uploads.filter((a) => a.kind === 'SCENE' && a.faceResolution !== 'EXCLUDED');
 
@@ -117,6 +120,7 @@ export class StoryboardService {
       { purpose: 'storyboard', system: storyboardSystem(cap.duration), user, thinking: true, maxTokens: 16000 },
       storyboardDraftSchema,
       {
+        onProgress,
         validate: (d) => {
           if (d.shots.length < range.min || d.shots.length > maxShots) {
             return `镜头数必须在 ${range.min}–${maxShots} 之间，现在是 ${d.shots.length}`;
@@ -133,6 +137,7 @@ export class StoryboardService {
       },
     );
 
+    onProgress?.({ phase: 'saving' });
     const spec = await this.buildSpecFromDraft(userId, project.id, product.id, draft, keyed, total, cap.duration);
     const saved = await this.saveVersion(userId, project.id, spec, { storylineId: storyline.id, note: '由故事线生成' });
     await this.prisma.$transaction([

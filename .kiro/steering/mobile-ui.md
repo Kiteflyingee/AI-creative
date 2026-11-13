@@ -207,6 +207,7 @@ inclusion: always
 | 已有图片的紧凑管理 | `ui-thumbs` 缩略图条（56×72）+ `ui-thumb-add`；需要处理的图右上角 `ui-thumb__flag`，点开用 `ActionSheet` 说明并处理 | 在主流程页放完整的图片网格和质量标签 |
 | 选填内容 | `ui-more` 折叠块（默认收起，副标题写清里面有什么），展开内容放 `ui-more-body` | 把选填输入框全部铺在页面上 |
 | 等待 AI | `ui-ai-status`（黑底一行说明 + 转圈）加形状一致的骨架 `ui-skel-point`、`ui-skel-line` | 整页遮罩转圈 |
+| 等待故事线 / 故事板 | `CreativeWaiting` / `ui-creation`：真实阶段、已等待秒数，可展开进展和已确认创作要求；错误用常驻 `Notice`。阶段只由服务端事件推进 | 假百分比、随机“思考”文案、展示未校验模型输出 |
 | 一个值 + 修改（如商品名称） | `ui-name-card`：小标签、大号值、来源 `Pill`、铅笔，整块可点 | 常驻输入框 |
 | 还没有图时的上传 | `UploadHero`（`ui-upload-hero`：黑色圆形加号 56、标题、说明、角度提示胶囊）；有图后换成 `ui-tiles` + `UploadButton variant="tile"`；批量上传用 `uploadFiles` | 空白的图片网格 |
 | 表单项标题旁的标签 | `ui-field__label-row` + `Pill`（“选填”用 `on-bg`，“AI 填写”用 `ink` 加 10 号星形） | 在标题后面写括号说明 |

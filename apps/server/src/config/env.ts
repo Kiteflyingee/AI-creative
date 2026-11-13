@@ -43,24 +43,24 @@ const envSchema = z.object({
 
   /**
    * 大模型供应商：deepseek = DeepSeek 官方；ark = 火山方舟托管的 DeepSeek；
-   * openai_compatible = 任意 OpenAI 兼容接口（如 Gemini 的 OpenAI 兼容接口），用 LLM_* 配置
+   * openai_compatible = 任意 OpenAI 兼容接口，用 LLM_* 配置；vertex = Google Cloud 原生 Gemini
    */
-  LLM_PROVIDER: z.enum(['deepseek', 'ark', 'openai_compatible']).default('deepseek'),
+  LLM_PROVIDER: z.enum(['deepseek', 'ark', 'openai_compatible', 'vertex']).default('vertex'),
   DEEPSEEK_API_KEY: z.string().default(''),
   DEEPSEEK_BASE_URL: z.string().default('https://api.deepseek.com'),
   DEEPSEEK_MODEL: z.string().default('deepseek-flash'),
   ARK_LLM_MODEL: z.string().default('deepseek-v4-1-flash-261017'),
   LLM_BASE_URL: z.string().default(''),
   LLM_API_KEY: z.string().default(''),
-  LLM_MODEL: z.string().default(''),
+  LLM_MODEL: z.string().default('gemini-3.8-flash'),
   /** 思考开关的写法：deepseek = thinking.type；reasoning_effort = OpenAI 写法；none = 不传 */
   LLM_THINKING_PARAM: z.enum(['deepseek', 'reasoning_effort', 'none']).default('none'),
   /** JSON 输出：json_object = response_format.type=json_object；none = 只靠提示词与校验 */
   LLM_JSON_MODE: z.enum(['json_object', 'none']).default('json_object'),
 
   /** 系统使用的模型组合（能力登记表键名）。新建项目时记录到项目上，之后该项目一直用这一组 */
-  VIDEO_MODEL: z.string().default('gemini-omni-1.2-flash'),
-  IMAGE_MODEL: z.string().default('nano-banana-2.1'),
+  VIDEO_MODEL: z.string().default('vertex-gemini-omni-1.2-flash'),
+  IMAGE_MODEL: z.string().default('vertex-nano-banana-2.1'),
 
   /** 火山方舟（国内）或 BytePlus ModelArk（海外）：两者接口相同，改地址与模型 ID 即可 */
   ARK_API_KEY: z.string().default(''),
@@ -71,15 +71,16 @@ const envSchema = z.object({
   ARK_VIDEO_MAX_CONCURRENCY: z.coerce.number().int().positive().default(3),
   ARK_VIDEO_RPM: z.coerce.number().int().positive().default(180),
 
-  /** Google Gemini API（Gemini Omni 视频、Nano Banana 图片） */
-  GEMINI_API_KEY: z.string().default(''),
-  GEMINI_BASE_URL: z.string().default('https://generativelanguage.googleapis.com/v1beta'),
-  /** Interactions API 的版本头（Api-Revision）；留空则不发送 */
-  GEMINI_API_REVISION: z.string().default('2026-05-20'),
-  OMNI_MODEL_ID: z.string().default('gemini-omni-1.2-flash'),
-  NANO_BANANA_MODEL_ID: z.string().default('gemini-nano-banana-2.1'),
-  GEMINI_VIDEO_MAX_CONCURRENCY: z.coerce.number().int().positive().default(3),
-  GEMINI_VIDEO_RPM: z.coerce.number().int().positive().default(30),
+  /** Google Cloud Vertex AI：ADC 认证，使用独立的供应商额度与模型键名 */
+  VERTEX_PROJECT_ID: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9.:-]*$/).or(z.literal('')).default(''),
+  // 本轮接入的 Omni Interactions 使用 global 端点
+  VERTEX_LOCATION: z.literal('global').default('global'),
+  VERTEX_LLM_MODEL: z.string().default('gemini-4-hydrogen'),
+  VERTEX_OMNI_MODEL_ID: z.string().default('gemini-omni-1.2-flash'),
+  VERTEX_IMAGE_MODEL_ID: z.string().default('gemini-nano-banana-2.1'),
+  VERTEX_API_REVISION: z.string().default('2026-05-20'),
+  VERTEX_VIDEO_MAX_CONCURRENCY: z.coerce.number().int().positive().default(3),
+  VERTEX_VIDEO_RPM: z.coerce.number().int().positive().default(30),
 
   VIDEO_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(10000),
   VIDEO_TASK_TIMEOUT_MS: z.coerce.number().int().positive().default(30 * 60 * 1000),

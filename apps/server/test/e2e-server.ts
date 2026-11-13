@@ -29,6 +29,12 @@ function currentShots(req: LlmRequest): Array<{ shotId: string; index: number }>
 async function main() {
   const storage = new StorageService();
   const llm = new FakeLlm();
+  // 留出可观察的等待窗口，验证进度交互；只用于假供应商的浏览器测试。
+  const complete = llm.complete.bind(llm);
+  llm.complete = async (req) => {
+    if (req.purpose === 'storylines' || req.purpose === 'storyboard') await new Promise((resolve) => setTimeout(resolve, 5000));
+    return complete(req);
+  };
   // 人物图视为含真人脸，用于验证人脸处理流程
   llm.on('inspect_image', (req) =>
     req.user.includes('人物图')

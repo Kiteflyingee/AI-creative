@@ -1,13 +1,14 @@
-import { STORY_DURATIONS, STORY_TYPES } from '@ai-creative/shared';
+import { STORY_TYPES } from '@ai-creative/shared';
 import { Dialog, Input, TextArea } from 'antd-mobile';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api, showError } from '../api';
 import { BottomBar, ChatBox, EmptyHint, FlowPage, Loading, PageHeader, Section } from '../components';
 import { useProject, useRefreshProject } from '../hooks';
+import { CreativeError, CreativeWaiting, useCreativeProgress } from '../CreativeProgress';
 import type { ProjectView, StorylineContent } from '../types';
-import { IconClock, IconRefresh } from '../ui/icons';
-import { Btn, ChoiceGroup, cx, Field, Pill, Sheet } from '../ui/kit';
+import { IconRefresh } from '../ui/icons';
+import { Btn, cx, Field, Notice, Pill, Sheet } from '../ui/kit';
 
 type Line = ProjectView['storylines'][number];
 
@@ -49,14 +50,6 @@ function EditSheet({ line, onClose, onSaved }: { line: Line | null; onClose: () 
       <Field label="开场钩子">
         <TextArea className="ui-input" value={value.hook} onChange={(v) => setDraft({ ...draft, hook: v })} autoSize maxLength={80} />
       </Field>
-      <Field label="时长">
-        <ChoiceGroup
-          label="时长"
-          options={STORY_DURATIONS.map((d) => ({ label: `${d} 秒`, value: d, icon: <IconClock size={18} /> }))}
-          value={[value.durationSec]}
-          onChange={(v) => v[0] && setDraft({ ...draft, durationSec: v[0] })}
-        />
-      </Field>
     </Sheet>
   );
 }
@@ -68,8 +61,10 @@ export function StorylinesPage() {
   const refresh = useRefreshProject(projectId);
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState<Line | null>(null);
+  const creation = useCreativeProgress();
 
   if (isLoading || !view) return <Loading />;
+  const needsReplan = view.storylines.some((line) => line.content.durationSec !== view.project.targetDurationSec);
 
   const regenerate = async () => {
     let direction = '';
@@ -88,10 +83,10 @@ export function StorylinesPage() {
     if (!ok) return;
     setBusy('regenerate');
     try {
-      await api.post(`/app/v1/projects/${projectId}/storylines`, { direction: direction.trim() });
+      if (!(await creation.run(`/app/v1/projects/${projectId}/storylines/stream`, { direction: direction.trim() }))) return;
       await refresh();
-    } catch (err) {
-      showError(err);
+    } catch {
+      await refresh();
     } finally {
       setBusy(null);
     }
@@ -101,20 +96,30 @@ export function StorylinesPage() {
     if (view.storyboard && !(await Dialog.confirm({ content: '重新选择会生成新的故事板（旧版本保留）。继续吗？' }))) return;
     setBusy(line.id);
     try {
-      await api.post(`/app/v1/storylines/${line.id}/select`);
+      if (!(await creation.run(`/app/v1/storylines/${line.id}/select/stream`, {}))) return;
       await refresh();
       navigate(`/p/${projectId}/storyboard`);
-    } catch (err) {
-      showError(err);
+    } catch {
+      await refresh();
     } finally {
       setBusy(null);
     }
   };
 
+  if (busy) return (
+    <FlowPage bar>
+      <PageHeader title={busy === 'regenerate' ? '生成故事线' : '生成故事板'} step={busy === 'regenerate' ? 1 : 2} back={`/p/${projectId}/product`} />
+      <CreativeWaiting kind={busy === 'regenerate' ? 'storylines' : 'storyboard'} events={creation.events} startedAt={creation.startedAt} durationSec={view.project.targetDurationSec} facts={view.product.facts.filter((f) => f.source === 'MERCHANT_CONFIRMED').map((f) => f.text)} title={view.storylines.find((line) => line.id === busy)?.content.title} />
+      <BottomBar><Btn block size="lg" variant="primary" loading disabled>生成中</Btn></BottomBar>
+    </FlowPage>
+  );
+
   return (
     <FlowPage bar>
       <PageHeader title="选择故事线" step={1} back={`/p/${projectId}/product`} />
-      <Section title="创意方向" desc="AI 根据已确认的卖点给出 4 条故事线，选一条生成故事板；不满意可以换一批">
+      <CreativeError message={creation.error} />
+      <Section title={`${view.project.targetDurationSec} 秒 · 创意方向`} desc="按同一时长比较 4 条创意，选一条生成故事板；不满意可以换一批" extra={<Btn size="xs" variant="ghost" onClick={() => navigate(`/p/${projectId}/product`)}>调整时长</Btn>}>
+        {needsReplan && <Notice tone="warning">现有方案的时长不一致，请返回确认卖点页，按所选 {view.project.targetDurationSec} 秒重新生成故事线</Notice>}
         {view.storylines.length === 0 && <EmptyHint text="还没有故事线" />}
         {view.storylines.map((line) => (
           <article key={line.id} className={cx('ui-story', line.selected && 'is-selected')} data-testid="storyline-card">
@@ -145,7 +150,7 @@ export function StorylinesPage() {
                 variant="primary"
                 block
                 loading={busy === line.id}
-                disabled={Boolean(busy)}
+                disabled={Boolean(busy) || line.content.durationSec !== view.project.targetDurationSec}
                 onClick={() => void select(line)}
                 data-testid="select-storyline"
               >
@@ -170,7 +175,7 @@ export function StorylinesPage() {
         </Btn>
         {view.storyboard && (
           <Btn block size="lg" variant="primary" onClick={() => navigate(`/p/${projectId}/storyboard`)}>
-            查看故事板
+            {view.storyboard.spec.durationSec === view.project.targetDurationSec ? '查看故事板' : `查看原 ${view.storyboard.spec.durationSec} 秒故事板`}
           </Btn>
         )}
       </BottomBar>

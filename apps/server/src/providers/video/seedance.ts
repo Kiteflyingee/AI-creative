@@ -169,15 +169,23 @@ export class SeedanceProvider implements VideoProvider {
   }
 
   async createTask(req: VideoCreateRequest): Promise<{ providerTaskId: string }> {
-    const res = await httpJson<ArkTaskResponse>({
-      provider: 'seedance',
-      method: 'POST',
-      url: `${this.base}/contents/generations/tasks`,
-      apiKey: this.apiKey,
-      body: this.buildBody(req),
-      timeoutMs: 120_000,
-    });
-    if (!res?.id) throw new ProviderError('seedance', 'BAD_RESPONSE', 'Seedance 未返回任务 ID', true);
+    let res: ArkTaskResponse;
+    try {
+      res = await httpJson<ArkTaskResponse>({
+        provider: 'seedance',
+        method: 'POST',
+        url: `${this.base}/contents/generations/tasks`,
+        apiKey: this.apiKey,
+        body: this.buildBody(req),
+        timeoutMs: 120_000,
+      });
+    } catch (err) {
+      if (err instanceof ProviderError && (['TIMEOUT', 'NETWORK'].includes(err.code) || (err.httpStatus ?? 0) >= 500)) {
+        throw new ProviderError('seedance', 'SUBMIT_UNKNOWN', '提交视频任务的结果不确定，请核对供应商任务记录后再重做', false);
+      }
+      throw err;
+    }
+    if (typeof res?.id !== 'string' || !res.id.trim()) throw new ProviderError('seedance', 'SUBMIT_UNKNOWN', 'Seedance 未返回有效任务 ID，无法确认是否已创建任务', false);
     return { providerTaskId: res.id };
   }
 

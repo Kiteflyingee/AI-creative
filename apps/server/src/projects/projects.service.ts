@@ -147,7 +147,7 @@ export class ProjectsService {
     const cap = videoCapability(project.videoModel);
 
     return jsonSafe({
-      project: { id: project.id, title: project.title, currentOutputId: project.currentOutputId },
+      project: { id: project.id, title: project.title, currentOutputId: project.currentOutputId, targetDurationSec: project.targetDurationSec },
       product: {
         id: product.id,
         name: product.name,

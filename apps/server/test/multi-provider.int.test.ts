@@ -9,9 +9,11 @@ function useModels(video: string, image: string) {
 }
 
 const SEEDANCE = ['seedance-2.5', 'seedream-5.0-pro'] as const;
-const GOOGLE = ['gemini-omni-1.2-flash', 'nano-banana-2.1'] as const;
+const VERTEX = ['vertex-gemini-omni-1.2-flash', 'vertex-nano-banana-2.1'] as const;
 
-describe('多供应商并存：Seedance/Seedream 与 Gemini Omni/Nano Banana', () => {
+describe('多供应商并存：Seedance/Seedream 与 Vertex AI', () => {
+  const GOOGLE = VERTEX;
+  const provider = 'google-vertex';
   let ctx: TestContext;
   let token: string;
   beforeAll(async () => {
@@ -37,8 +39,8 @@ describe('多供应商并存：Seedance/Seedream 与 Gemini Omni/Nano Banana', (
     ctx.http().post(`/app/v1/projects/${projectId}/generate`).set(auth(token)).send(body);
   const view = async (projectId: string) => (await ctx.http().get(`/app/v1/projects/${projectId}`).set(auth(token)).expect(200)).body;
 
-  it('Google 组合：参考图由 Nano Banana 生成，每个镜头调用一次 Omni，转存后删除 Google 侧记录', async () => {
-    useModels(...GOOGLE);
+  it('Google 组合：参考图由 Nano Banana 生成，每个镜头调用一次 Omni，完成后转存', async () => {
+    useModels(GOOGLE[0], GOOGLE[1]);
     const { projectId, view: v } = await prepareStoryboard(ctx, token);
     // 商家不选模型；页面只拿到该模型的时长规则和分辨率，没有 480p，也没有虚拟人像
     expect(v.model).toMatchObject({ resolutions: ['720p', '1080p'], duration: { min: 3, max: 15 } });
@@ -65,20 +67,18 @@ describe('多供应商并存：Seedance/Seedream 与 Gemini Omni/Nano Banana', (
       expect(t.req.compiled.prompt).toContain('Do not render subtitles');
       expect(t.req.images.every((i) => i.kind === 'base64')).toBe(true);
     }
-    // 转存顺序取决于轮询顺序，这里只比较集合
-    expect([...omni().cleaned].sort()).toEqual(omni().tasks.map((t) => t.id).sort());
     const clips = await ctx.prisma.clip.findMany();
-    expect(clips.every((c) => c.provider === 'google-gemini' && c.modelKey === 'gemini-omni-1.2-flash' && c.status === 'SUCCEEDED')).toBe(true);
+    expect(clips.every((c) => c.provider === provider && c.modelKey === GOOGLE[0] && c.status === 'SUCCEEDED')).toBe(true);
     const out = (await view(projectId)).outputs[0];
     expect(out).toMatchObject({ status: 'READY', width: 720, height: 1280 });
   });
 
   it('改配置只影响新建项目：已有项目继续用创建时的模型（含重做镜头）', async () => {
     const a = await prepareStoryboard(ctx, token, '项目A');
-    useModels(...GOOGLE);
+    useModels(GOOGLE[0], GOOGLE[1]);
     const b = await prepareStoryboard(ctx, token, '项目B');
     expect((await ctx.prisma.project.findUniqueOrThrow({ where: { id: a.projectId } })).videoModel).toBe('seedance-2.5');
-    expect((await ctx.prisma.project.findUniqueOrThrow({ where: { id: b.projectId } })).videoModel).toBe('gemini-omni-1.2-flash');
+    expect((await ctx.prisma.project.findUniqueOrThrow({ where: { id: b.projectId } })).videoModel).toBe(GOOGLE[0]);
 
     // 配置已经切到 Google，项目 A 仍然用 Seedance，480p 仍可用，虚拟人像仍显示
     expect(a.view.model.resolutions).toContain('480p');
@@ -117,7 +117,7 @@ describe('多供应商并存：Seedance/Seedream 与 Gemini Omni/Nano Banana', (
 
   it('并发按供应商分别计算：一家满了不影响另一家', async () => {
     const a = await prepareStoryboard(ctx, token, '项目A');
-    useModels(...GOOGLE);
+    useModels(GOOGLE[0], GOOGLE[1]);
     const b = await prepareStoryboard(ctx, token, '项目B');
     ctx.video.pollsQueued = 5;
     omni().pollsQueued = 5;
@@ -132,6 +132,36 @@ describe('多供应商并存：Seedance/Seedream 与 Gemini Omni/Nano Banana', (
     expect((await runJob(ctx, jobB.body.id)).status).toBe('COMPLETED');
     expect((await runJob(ctx, jobA.body.id)).status).toBe('COMPLETED');
     expect(omni().tasks).toHaveLength(3);
+  });
+
+  it('同一次确认只建一个任务；排队取消后不调用视频供应商', async () => {
+    useModels(GOOGLE[0], GOOGLE[1]);
+    const { projectId } = await prepareStoryboard(ctx, token);
+    const body = { resolution: '720p', idempotencyKey: 'google-idem-0001' };
+    const first = await generate(projectId, body).expect(201);
+    const again = await generate(projectId, body).expect(201);
+    expect(again.body.id).toBe(first.body.id);
+    expect(await ctx.prisma.generationJob.count()).toBe(1);
+    const cancelled = await ctx.http().post(`/app/v1/jobs/${first.body.id}/cancel`).set(auth(token)).expect(201);
+    expect(cancelled.body.job.status).toBe('CANCELLED');
+    expect(omni().createAttempts).toHaveLength(0);
+  });
+
+  it('限流退避后重试，永久错误保留失败状态，只重做失败镜头', async () => {
+    useModels(GOOGLE[0], GOOGLE[1]);
+    const { projectId } = await prepareStoryboard(ctx, token);
+    omni().plans = ['submit_retryable', 'submit_fatal'];
+    const job = await generate(projectId, { resolution: '720p', idempotencyKey: 'google-retry-001' }).expect(201);
+    await ctx.generation.tick();
+    const retrying = await ctx.prisma.clip.findFirstOrThrow({ where: { status: 'QUEUED', submitAttempts: 1 } });
+    expect(retrying.nextAttemptAt!.getTime()).toBeGreaterThan(Date.now());
+    await ctx.prisma.clip.update({ where: { id: retrying.id }, data: { nextAttemptAt: new Date(Date.now() - 1000) } });
+    expect((await runJob(ctx, job.body.id)).status).toBe('PARTIAL_FAILED');
+    const failed = await ctx.prisma.clip.findFirstOrThrow({ where: { status: 'FAILED' } });
+    const before = omni().tasks.length;
+    const redo = await generate(projectId, { resolution: '720p', shotIds: [failed.shotId], idempotencyKey: 'google-redo-0001' }).expect(201);
+    expect((await runJob(ctx, redo.body.id)).status).toBe('COMPLETED');
+    expect(omni().tasks).toHaveLength(before + 1);
   });
 
   describe('人脸处理按模型区分', () => {
@@ -161,7 +191,7 @@ describe('多供应商并存：Seedance/Seedream 与 Gemini Omni/Nano Banana', (
     };
 
     it('Gemini 项目不能选虚拟人像；提示里也不出现虚拟人像', async () => {
-      useModels(...GOOGLE);
+      useModels(GOOGLE[0], GOOGLE[1]);
       const { projectId, personId } = await prepareWithFace();
       const blocked = await generate(projectId, { resolution: '720p', idempotencyKey: 'face-g-0001' }).expect(400);
       expect(blocked.body.message).toContain('真人脸');
@@ -176,7 +206,7 @@ describe('多供应商并存：Seedance/Seedream 与 Gemini Omni/Nano Banana', (
     });
 
     it('Gemini 项目选 AI 相似人物：Nano Banana 文生图生成新人物，发给 Omni 的是新人物而不是原图', async () => {
-      useModels(...GOOGLE);
+      useModels(GOOGLE[0], GOOGLE[1]);
       const { projectId, personId } = await prepareWithFace();
       const res = await ctx.http().post(`/app/v1/assets/${personId}/face`).set(auth(token)).send({ resolution: 'AI_SIMILAR' }).expect(201);
       await ctx.queue.drain();
@@ -189,7 +219,7 @@ describe('多供应商并存：Seedance/Seedream 与 Gemini Omni/Nano Banana', (
     });
 
     it('Seedance 只信任同账号 Seedream 生成的人物图：组合配成 Seedance + Nano Banana 时，生成前提示重新生成人物', async () => {
-      useModels('seedance-2.5', 'nano-banana-2.1');
+      useModels('seedance-2.5', VERTEX[1]);
       const { projectId } = await prepareStoryboard(ctx, token, '混搭组合');
       const res = await generate(projectId, { resolution: '480p', idempotencyKey: 'mix-key-0001' }).expect(400);
       expect(res.body.code).toBe('NOT_READY');

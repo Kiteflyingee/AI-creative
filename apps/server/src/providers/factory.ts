@@ -1,29 +1,24 @@
-import { NanoBananaProvider } from './image/nano-banana';
+import { ProviderError } from '../common/errors';
 import { SeedreamProvider } from './image/seedream';
+import { VertexImageProvider } from './image/vertex-image';
 import type { ImageModelCapability, ImageProvider, ProviderFactory, VideoModelCapability, VideoProvider } from './types';
-import { GeminiOmniProvider } from './video/gemini-omni';
 import { SeedanceProvider } from './video/seedance';
+import { VertexOmniProvider } from './video/vertex-omni';
 
-/** 按能力登记表中的 provider 创建真实适配器；新增供应商时在这里登记 */
+/** 只按项目绑定的供应商创建直连适配器，不跨供应商兜底。 */
 export function createVideoAdapter(cap: VideoModelCapability): VideoProvider {
   switch (cap.provider) {
-    case 'volcengine-ark':
-      return new SeedanceProvider(cap);
-    case 'google-gemini':
-      return new GeminiOmniProvider(cap);
-    default:
-      throw new Error(`视频模型 ${cap.key} 还没有实现适配器`);
+    case 'google-vertex': return new VertexOmniProvider(cap);
+    case 'volcengine-ark': return new SeedanceProvider(cap);
+    default: throw new ProviderError(cap.provider, 'NOT_SUPPORTED', '未实现该视频供应商', false);
   }
 }
 
 export function createImageAdapter(cap: ImageModelCapability): ImageProvider {
   switch (cap.provider) {
-    case 'volcengine-ark':
-      return new SeedreamProvider(cap);
-    case 'google-gemini':
-      return new NanoBananaProvider(cap);
-    default:
-      throw new Error(`图片模型 ${cap.key} 还没有实现适配器`);
+    case 'google-vertex': return new VertexImageProvider(cap);
+    case 'volcengine-ark': return new SeedreamProvider(cap);
+    default: throw new ProviderError(cap.provider, 'NOT_SUPPORTED', '未实现该图片供应商', false);
   }
 }
 

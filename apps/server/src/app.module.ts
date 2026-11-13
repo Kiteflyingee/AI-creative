@@ -26,8 +26,8 @@ import { ProductsService } from './products/products.service';
 import { ProjectsService } from './projects/projects.service';
 import { realProviderFactory } from './providers/factory';
 import { LlmService } from './providers/llm/llm.service';
-import { OpenAiCompatibleLlm } from './providers/llm/openai-compatible';
 import { ModelHub } from './providers/model-hub';
+import { createLlmAdapter } from './providers/llm/factory';
 import { COMPOSER, LLM_PROVIDER, PROVIDER_FACTORY } from './providers/types';
 import { BullJobQueue } from './queue/bullmq.queue';
 import { InlineJobQueue } from './queue/inline.queue';
@@ -60,39 +60,6 @@ export class AppExceptionFilter implements ExceptionFilter {
   }
 }
 
-/** 大模型供应商可配置（D-47）：DeepSeek 官方、火山方舟托管的 DeepSeek，或任意 OpenAI 兼容接口 */
-function createLlm() {
-  const env = getEnv();
-  switch (env.LLM_PROVIDER) {
-    case 'ark':
-      return new OpenAiCompatibleLlm({
-        provider: 'ark-deepseek',
-        baseUrl: env.ARK_BASE_URL,
-        apiKey: env.ARK_API_KEY,
-        modelId: env.ARK_LLM_MODEL,
-        thinkingParam: 'deepseek',
-        jsonMode: 'json_object',
-      });
-    case 'openai_compatible':
-      return new OpenAiCompatibleLlm({
-        provider: 'llm',
-        baseUrl: env.LLM_BASE_URL,
-        apiKey: env.LLM_API_KEY,
-        modelId: env.LLM_MODEL,
-        thinkingParam: env.LLM_THINKING_PARAM,
-        jsonMode: env.LLM_JSON_MODE,
-      });
-    default:
-      return new OpenAiCompatibleLlm({
-        provider: 'deepseek',
-        baseUrl: env.DEEPSEEK_BASE_URL,
-        apiKey: env.DEEPSEEK_API_KEY,
-        modelId: env.DEEPSEEK_MODEL,
-        thinkingParam: 'deepseek',
-        jsonMode: 'json_object',
-      });
-  }
-}
 
 @Module({
   imports: [PrismaModule, AuthModule],
@@ -109,7 +76,7 @@ function createLlm() {
     OutputsService,
     LlmService,
     ModelHub,
-    { provide: LLM_PROVIDER, useFactory: createLlm },
+    { provide: LLM_PROVIDER, useFactory: createLlmAdapter },
     { provide: PROVIDER_FACTORY, useValue: realProviderFactory },
     { provide: COMPOSER, useFactory: () => new RemotionComposer() },
     { provide: JOB_QUEUE, useFactory: () => (getEnv().JOB_QUEUE_MODE === 'inline' ? new InlineJobQueue() : new BullJobQueue()) },

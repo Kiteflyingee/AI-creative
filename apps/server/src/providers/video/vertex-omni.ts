@@ -1,14 +1,5 @@
 import { ProviderError } from '../../common/errors';
-import {
-  downloadGeminiFile,
-  GEMINI_PROVIDER,
-  geminiBase,
-  geminiCall,
-  modelOutputs,
-  outputText,
-  toGeminiImagePart,
-  type InteractionResponse,
-} from '../gemini';
+import { downloadVertexFile, modelOutputs, outputText, toVertexInteractionImagePart, vertexBase, vertexInteractionCall, VERTEX_PROVIDER, type InteractionResponse } from '../vertex';
 import type {
   CompiledVideoRequest,
   ImageSourceRef,
@@ -169,11 +160,11 @@ export function parseInteraction(res: InteractionResponse, id: string): VideoTas
 }
 
 /**
- * Gemini Omni 适配器（Interactions API，后台执行）：
+ * Vertex AI Gemini Omni 适配器（全局 Interactions API，ADC 认证）：
  * POST /interactions（background=true）→ GET /interactions/{id} 轮询 → POST /interactions/{id}/cancel 取消；
  * 转存成功后 DELETE /interactions/{id}，不在 Google 保留商家的图片与视频。
  */
-export class GeminiOmniProvider implements VideoProvider {
+export class VertexOmniProvider implements VideoProvider {
   constructor(readonly capability: VideoModelCapability) {}
 
   compile(spec: ShotRenderSpec): CompiledVideoRequest {
@@ -187,12 +178,14 @@ export class GeminiOmniProvider implements VideoProvider {
   }
 
   async buildBody(req: VideoCreateRequest): Promise<Record<string, unknown>> {
-    const parts = await Promise.all(req.images.map((img) => toGeminiImagePart(img)));
+    const parts = await Promise.all(req.images.map((img) => toVertexInteractionImagePart(img)));
     return {
       model: this.capability.modelId,
       input: [...parts, { type: 'text', text: req.compiled.prompt }],
-      response_format: { type: 'video', ...req.compiled.params },
+      response_format: [{ type: 'video', ...req.compiled.params, delivery: 'inline' }],
       background: true,
+      store: true,
+      generation_config: { video_config: { task: req.images.length ? 'reference_to_video' : 'text_to_video' } },
     };
   }
 
@@ -200,21 +193,21 @@ export class GeminiOmniProvider implements VideoProvider {
     const body = await this.buildBody(req);
     let res: InteractionResponse;
     try {
-      res = await geminiCall<InteractionResponse>({ method: 'POST', url: `${geminiBase()}/interactions`, body, timeoutMs: 120_000 });
+      res = await vertexInteractionCall<InteractionResponse>({ method: 'POST', url: `${vertexBase('v1beta1')}/interactions`, body, timeoutMs: 120_000 });
     } catch (err) {
       // 请求已经发出但没有等到返回：无法确认是否已创建任务，不自动重试，避免重复生成
-      if (err instanceof ProviderError && err.code === 'TIMEOUT') {
-        throw new ProviderError(GEMINI_PROVIDER, 'SUBMIT_UNKNOWN', '提交视频任务超时，无法确认是否已创建任务', false);
+      if (err instanceof ProviderError && (['TIMEOUT', 'NETWORK'].includes(err.code) || (err.httpStatus ?? 0) >= 500)) {
+        throw new ProviderError(VERTEX_PROVIDER, 'SUBMIT_UNKNOWN', '提交视频任务的结果不确定，请核对供应商任务记录后再重做', false);
       }
       throw err;
     }
-    if (!res?.id) throw new ProviderError(GEMINI_PROVIDER, 'BAD_RESPONSE', 'Gemini 未返回任务 ID', false);
+    if (typeof res?.id !== 'string' || !res.id.trim()) throw new ProviderError(VERTEX_PROVIDER, 'SUBMIT_UNKNOWN', 'Vertex 未返回有效任务 ID，无法确认是否已创建任务', false);
     return { providerTaskId: res.id };
   }
 
   async getTask(providerTaskId: string): Promise<VideoTaskStatus> {
-    const res = await geminiCall<InteractionResponse>({
-      url: `${geminiBase()}/interactions/${encodeURIComponent(providerTaskId)}`,
+    const res = await vertexInteractionCall<InteractionResponse>({
+      url: `${vertexBase('v1beta1')}/interactions/${encodeURIComponent(providerTaskId)}`,
       timeoutMs: 120_000,
     });
     return parseInteraction(res, providerTaskId);
@@ -222,9 +215,9 @@ export class GeminiOmniProvider implements VideoProvider {
 
   async cancelTask(providerTaskId: string): Promise<'cancelled' | 'not_cancellable'> {
     try {
-      await geminiCall({
+      await vertexInteractionCall({
         method: 'POST',
-        url: `${geminiBase()}/interactions/${encodeURIComponent(providerTaskId)}/cancel`,
+        url: `${vertexBase('v1beta1')}/interactions/${encodeURIComponent(providerTaskId)}/cancel`,
         timeoutMs: 30_000,
       });
       return 'cancelled';
@@ -235,25 +228,25 @@ export class GeminiOmniProvider implements VideoProvider {
   }
 
   async downloadResult(resultRef: string, providerTaskId: string): Promise<Buffer> {
-    if (!resultRef.startsWith('interaction:')) return downloadGeminiFile(resultRef, 10 * 60_000);
-    const res = await geminiCall<InteractionResponse>({
-      url: `${geminiBase()}/interactions/${encodeURIComponent(providerTaskId)}`,
+    if (!resultRef.startsWith('interaction:')) return downloadVertexFile(resultRef, 10 * 60_000);
+    const res = await vertexInteractionCall<InteractionResponse>({
+      url: `${vertexBase('v1beta1')}/interactions/${encodeURIComponent(providerTaskId)}`,
       timeoutMs: 10 * 60_000,
     });
     const video = modelOutputs(res).find((c) => c.type === 'video' && (c.data || c.uri));
     if (video?.data) {
       const data = Buffer.from(video.data, 'base64');
-      if (!data.length) throw new ProviderError(GEMINI_PROVIDER, 'EMPTY_VIDEO', 'Gemini 返回的视频为空', false);
+      if (!data.length) throw new ProviderError(VERTEX_PROVIDER, 'EMPTY_VIDEO', 'Gemini 返回的视频为空', false);
       return data;
     }
-    if (video?.uri) return downloadGeminiFile(video.uri, 10 * 60_000);
-    throw new ProviderError(GEMINI_PROVIDER, 'NO_VIDEO', 'Gemini 结果里没有视频', false);
+    if (video?.uri) return downloadVertexFile(video.uri, 10 * 60_000);
+    throw new ProviderError(VERTEX_PROVIDER, 'NO_VIDEO', 'Gemini 结果里没有视频', false);
   }
 
   async cleanup(providerTaskId: string): Promise<void> {
-    await geminiCall({
+    await vertexInteractionCall({
       method: 'DELETE',
-      url: `${geminiBase()}/interactions/${encodeURIComponent(providerTaskId)}`,
+      url: `${vertexBase('v1beta1')}/interactions/${encodeURIComponent(providerTaskId)}`,
       timeoutMs: 30_000,
     });
   }
